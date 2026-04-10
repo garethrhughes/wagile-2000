@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useState, type FormEvent } from 'react';
+import { type ReactNode, useState, useEffect, type FormEvent } from 'react';
 import { KeyRound } from 'lucide-react';
 import { useAuthStore } from '@/store/auth-store';
 
@@ -12,6 +12,17 @@ export function AuthGate({ children }: AuthGateProps) {
   const { apiKey, setApiKey } = useAuthStore();
   const [input, setInput] = useState('');
   const [error, setError] = useState('');
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Render nothing until mounted to avoid hydration mismatch
+  // (server has no localStorage, so apiKey differs between server and client)
+  if (!mounted) {
+    return null;
+  }
 
   if (apiKey) {
     return <>{children}</>;
