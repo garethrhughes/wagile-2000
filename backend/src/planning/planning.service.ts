@@ -103,81 +103,106 @@ export class PlanningService {
       return this.emptyAccuracy(sprint);
     }
 
-    // Get all issues currently associated with this sprint
-    const currentIssues = await this.issueRepo.find({
-      where: { sprintId: sprint.id },
+    const sprintName = sprint.name;
+    const sprintStart = sprint.startDate;
+
+    // Get ALL board issues so we can reconstruct sprint membership from changelogs.
+    // We can't rely on the sprintId column alone because upsert during sync
+    // overwrites it with the last-synced sprint.
+    const boardIssues = await this.issueRepo.find({
+      where: { boardId: sprint.boardId },
     });
 
-    const issueKeys = currentIssues.map((i) => i.key);
-
-    if (issueKeys.length === 0) {
+    if (boardIssues.length === 0) {
       return this.emptyAccuracy(sprint);
     }
 
-    // Fetch all sprint-field changelogs for these issues in bulk
+    const allKeys = boardIssues.map((i) => i.key);
+    const issueStatusMap = new Map(
+      boardIssues.map((i) => [i.key, i.status]),
+    );
+
+    // Fetch Sprint-field changelogs for all board issues in bulk
     const sprintChangelogs = await this.changelogRepo
       .createQueryBuilder('cl')
-      .where('cl.issueKey IN (:...keys)', { keys: issueKeys })
+      .where('cl.issueKey IN (:...keys)', { keys: allKeys })
       .andWhere('cl.field = :field', { field: 'Sprint' })
       .orderBy('cl.changedAt', 'ASC')
       .getMany();
 
-    // Also get status changelogs in bulk
-    const statusChangelogs = await this.changelogRepo
-      .createQueryBuilder('cl')
-      .where('cl.issueKey IN (:...keys)', { keys: issueKeys })
-      .andWhere('cl.field = :field', { field: 'status' })
-      .orderBy('cl.changedAt', 'ASC')
-      .getMany();
+    // Group changelogs by issue, keeping only those that reference this sprint
+    const logsByIssue = new Map<string, JiraChangelog[]>();
+    for (const cl of sprintChangelogs) {
+      if (
+        this.sprintValueContains(cl.fromValue, sprintName) ||
+        this.sprintValueContains(cl.toValue, sprintName)
+      ) {
+        const list = logsByIssue.get(cl.issueKey) ?? [];
+        list.push(cl);
+        logsByIssue.set(cl.issueKey, list);
+      }
+    }
 
-    // Reconstruct sprint membership at sprint start date
-    // An issue was "committed" if it was in the sprint at sprint start
-    const sprintName = sprint.name;
-    const sprintStart = sprint.startDate;
+    // Also include issues currently assigned to this sprint with no changelog
+    // (they were likely created directly in the sprint)
+    const currentIssues = boardIssues.filter(
+      (i) => i.sprintId === sprint.id,
+    );
+    for (const issue of currentIssues) {
+      if (!logsByIssue.has(issue.key)) {
+        logsByIssue.set(issue.key, []);
+      }
+    }
 
+    if (logsByIssue.size === 0) {
+      return this.emptyAccuracy(sprint);
+    }
+
+    // Classify each issue: committed, added, or removed
     const committedKeys = new Set<string>();
     const addedKeys = new Set<string>();
     const removedKeys = new Set<string>();
 
-    for (const issue of currentIssues) {
-      // Check if issue was added to sprint before or at sprint start
-      const issueSprintLogs = sprintChangelogs.filter(
-        (cl) => cl.issueKey === issue.key,
-      );
-
-      const wasInSprintAtStart = this.wasInSprintAtDate(
-        issueSprintLogs,
+    for (const [issueKey, logs] of logsByIssue) {
+      const wasAtStart = this.wasInSprintAtDate(
+        logs,
         sprintName,
         sprintStart,
       );
 
-      if (wasInSprintAtStart) {
-        committedKeys.add(issue.key);
-      } else {
-        // Added after sprint start
-        addedKeys.add(issue.key);
+      // Track final sprint membership after sprint start
+      let inSprint = wasAtStart;
+      for (const cl of logs) {
+        if (cl.changedAt <= sprintStart) continue;
+        if (this.sprintValueContains(cl.toValue, sprintName)) {
+          inSprint = true;
+        }
+        if (
+          this.sprintValueContains(cl.fromValue, sprintName) &&
+          !this.sprintValueContains(cl.toValue, sprintName)
+        ) {
+          inSprint = false;
+        }
       }
-    }
 
-    // Check for removed issues: look for changelogs where sprint was removed
-    // from any issue after sprint started
-    const allSprintChangelogs = await this.changelogRepo
-      .createQueryBuilder('cl')
-      .where('cl.field = :field', { field: 'Sprint' })
-      .andWhere('cl.fromValue LIKE :sprintName', {
-        sprintName: `%${sprintName}%`,
-      })
-      .andWhere('cl.changedAt > :start', { start: sprintStart })
-      .getMany();
-
-    for (const cl of allSprintChangelogs) {
-      // The issue was removed from this sprint if the fromValue contained
-      // this sprint name and the toValue does not
-      if (
-        cl.fromValue?.includes(sprintName) &&
-        !cl.toValue?.includes(sprintName)
-      ) {
-        removedKeys.add(cl.issueKey);
+      if (wasAtStart) {
+        committedKeys.add(issueKey);
+        if (!inSprint) {
+          removedKeys.add(issueKey);
+        }
+      } else {
+        // Was it ever added to this sprint after the start?
+        const addedAfterStart = logs.some(
+          (cl) =>
+            cl.changedAt > sprintStart &&
+            this.sprintValueContains(cl.toValue, sprintName),
+        );
+        if (addedAfterStart) {
+          addedKeys.add(issueKey);
+          if (!inSprint) {
+            removedKeys.add(issueKey);
+          }
+        }
       }
     }
 
@@ -191,29 +216,43 @@ export class PlanningService {
       'Released',
     ];
 
-    const completedKeys = new Set<string>();
-    const statusLogsByIssue = new Map<string, JiraChangelog[]>();
-    for (const cl of statusChangelogs) {
-      const list = statusLogsByIssue.get(cl.issueKey) ?? [];
-      list.push(cl);
-      statusLogsByIssue.set(cl.issueKey, list);
-    }
+    // Only look at issues that ended up in the sprint (committed + added - removed)
+    const finalSprintKeys = new Set([...committedKeys, ...addedKeys]);
+    for (const key of removedKeys) finalSprintKeys.delete(key);
 
-    for (const issue of currentIssues) {
-      // An issue is completed if its current status is done,
-      // or if it has a done transition during the sprint window
-      if (doneStatuses.includes(issue.status)) {
-        completedKeys.add(issue.key);
-      } else {
-        const logs = statusLogsByIssue.get(issue.key) ?? [];
-        const hasDoneTransition = logs.some(
-          (cl) =>
-            doneStatuses.includes(cl.toValue ?? '') &&
-            sprint.endDate &&
-            cl.changedAt <= sprint.endDate,
-        );
-        if (hasDoneTransition) {
-          completedKeys.add(issue.key);
+    const completedKeys = new Set<string>();
+
+    if (finalSprintKeys.size > 0) {
+      const finalKeys = [...finalSprintKeys];
+      const statusChangelogs = await this.changelogRepo
+        .createQueryBuilder('cl')
+        .where('cl.issueKey IN (:...keys)', { keys: finalKeys })
+        .andWhere('cl.field = :field', { field: 'status' })
+        .orderBy('cl.changedAt', 'ASC')
+        .getMany();
+
+      const statusLogsByIssue = new Map<string, JiraChangelog[]>();
+      for (const cl of statusChangelogs) {
+        const list = statusLogsByIssue.get(cl.issueKey) ?? [];
+        list.push(cl);
+        statusLogsByIssue.set(cl.issueKey, list);
+      }
+
+      for (const key of finalKeys) {
+        const status = issueStatusMap.get(key);
+        if (status && doneStatuses.includes(status)) {
+          completedKeys.add(key);
+        } else {
+          const logs = statusLogsByIssue.get(key) ?? [];
+          const hasDoneTransition = logs.some(
+            (cl) =>
+              doneStatuses.includes(cl.toValue ?? '') &&
+              sprint.endDate &&
+              cl.changedAt <= sprint.endDate,
+          );
+          if (hasDoneTransition) {
+            completedKeys.add(key);
+          }
         }
       }
     }
@@ -222,14 +261,15 @@ export class PlanningService {
     const added = addedKeys.size;
     const removed = removedKeys.size;
     const completed = completedKeys.size;
-    const totalScope = commitment + added;
     const scopeChangePercent =
       commitment > 0
         ? Math.round(((added + removed) / commitment) * 10000) / 100
         : 0;
     const completionRate =
-      totalScope > 0
-        ? Math.round((completed / totalScope) * 10000) / 100
+      commitment + added - removed > 0
+        ? Math.round(
+            (completed / (commitment + added - removed)) * 10000,
+          ) / 100
         : 0;
 
     return {
@@ -245,35 +285,49 @@ export class PlanningService {
     };
   }
 
+  /**
+   * Check if an issue was in the sprint at the given date by
+   * replaying Sprint-field changelogs.
+   */
   private wasInSprintAtDate(
     sprintChangelogs: JiraChangelog[],
     sprintName: string,
     date: Date,
   ): boolean {
-    // Look through changelogs before the date to determine if issue was in the sprint
     let inSprint = false;
 
     for (const cl of sprintChangelogs) {
       if (cl.changedAt > date) break;
 
-      if (cl.toValue?.includes(sprintName)) {
+      if (this.sprintValueContains(cl.toValue, sprintName)) {
         inSprint = true;
       }
       if (
-        cl.fromValue?.includes(sprintName) &&
-        !cl.toValue?.includes(sprintName)
+        this.sprintValueContains(cl.fromValue, sprintName) &&
+        !this.sprintValueContains(cl.toValue, sprintName)
       ) {
         inSprint = false;
       }
     }
 
-    // If no changelog found, the issue might have been created with the sprint
-    // (first sprint assignment doesn't always have a changelog)
+    // No changelog means the issue was assigned to the sprint at creation
     if (sprintChangelogs.length === 0) {
-      return true; // Assume committed if no sprint changelog exists
+      return true;
     }
 
     return inSprint;
+  }
+
+  /**
+   * Exact sprint-name match inside a comma-separated Sprint field value.
+   * Prevents "Sprint 1" from matching "Sprint 10".
+   */
+  private sprintValueContains(
+    value: string | null,
+    sprintName: string,
+  ): boolean {
+    if (!value) return false;
+    return value.split(',').some((s) => s.trim() === sprintName);
   }
 
   private emptyAccuracy(sprint: JiraSprint): SprintAccuracy {
