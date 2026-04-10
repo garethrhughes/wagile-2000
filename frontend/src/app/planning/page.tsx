@@ -389,7 +389,19 @@ export default function PlanningPage() {
   // Quarter-mode table columns
   const quarterColumns = useMemo<Column<QuarterRow>[]>(
     () => [
-      { key: 'quarter', label: 'Quarter', sortable: true },
+      {
+        key: 'quarter',
+        label: 'Quarter',
+        sortable: true,
+        render: (value) => (
+          <Link
+            href={`/quarter/${encodeURIComponent(selectedBoard)}/${encodeURIComponent(String(value))}?from=planning`}
+            className="font-medium text-blue-600 hover:underline"
+          >
+            {String(value)}
+          </Link>
+        ),
+      },
       { key: 'commitment', label: 'Commitment', sortable: true },
       { key: 'added', label: 'Added', sortable: true },
       { key: 'removed', label: 'Removed', sortable: true },
@@ -416,7 +428,7 @@ export default function PlanningPage() {
         render: (value) => `${Number(value).toFixed(1)}%`,
       },
     ],
-    [],
+    [selectedBoard],
   );
 
   const hasData =
