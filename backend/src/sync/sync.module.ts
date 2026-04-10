@@ -12,6 +12,7 @@ import {
   BoardConfig,
   RoadmapConfig,
   JpdIdea,
+  JiraIssueLink,
 } from '../database/entities/index.js';
 
 @Module({
@@ -25,6 +26,7 @@ import {
       BoardConfig,
       RoadmapConfig,
       JpdIdea,
+      JiraIssueLink,
     ]),
     JiraModule,
   ],

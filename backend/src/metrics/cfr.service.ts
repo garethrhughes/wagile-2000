@@ -6,6 +6,7 @@ import {
   JiraChangelog,
   JiraVersion,
   BoardConfig,
+  JiraIssueLink,
 } from '../database/entities/index.js';
 import { classifyChangeFailureRate, type DoraBand } from './dora-bands.js';
 
@@ -30,6 +31,8 @@ export class CfrService {
     private readonly versionRepo: Repository<JiraVersion>,
     @InjectRepository(BoardConfig)
     private readonly boardConfigRepo: Repository<BoardConfig>,
+    @InjectRepository(JiraIssueLink)
+    private readonly issueLinkRepo: Repository<JiraIssueLink>,
   ) {}
 
   async calculate(
@@ -54,6 +57,10 @@ export class CfrService {
       'regression',
       'incident',
       'hotfix',
+    ];
+    const failureLinkTypes = config?.failureLinkTypes ?? [
+      'caused by',
+      'is caused by',
     ];
 
     // Count total deployments (issues that reached done in the period)
@@ -114,9 +121,9 @@ export class CfrService {
     ]);
     const totalDeployments = deployedKeys.size;
 
-    // Count failure issues among deployed
+    // Count failure issues among deployed (type/label OR-gate)
     const issueMap = new Map(allIssues.map((i) => [i.key, i]));
-    let failureCount = 0;
+    const failureIssues: JiraIssue[] = [];
 
     for (const key of deployedKeys) {
       const issue = issueMap.get(key);
@@ -128,9 +135,28 @@ export class CfrService {
       );
 
       if (isFailureType || hasFailureLabel) {
-        failureCount++;
+        failureIssues.push(issue);
       }
     }
+
+    // AND-gate: require a causal link if failureLinkTypes is non-empty
+    let filteredFailures = failureIssues;
+    if (failureLinkTypes.length > 0 && failureIssues.length > 0) {
+      const failureKeys = failureIssues.map((i) => i.key);
+      const causalLinks = await this.issueLinkRepo
+        .createQueryBuilder('link')
+        .where('link.sourceIssueKey IN (:...keys)', { keys: failureKeys })
+        .andWhere('LOWER(link.linkTypeName) IN (:...types)', {
+          types: failureLinkTypes.map((t) => t.toLowerCase()),
+        })
+        .getMany();
+      const keysWithCausalLink = new Set(causalLinks.map((l) => l.sourceIssueKey));
+      filteredFailures = failureIssues.filter((i) =>
+        keysWithCausalLink.has(i.key),
+      );
+    }
+
+    const failureCount = filteredFailures.length;
 
     const changeFailureRate =
       totalDeployments > 0

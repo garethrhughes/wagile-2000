@@ -13,10 +13,12 @@ import {
   BoardConfig,
   RoadmapConfig,
   JpdIdea,
+  JiraIssueLink,
 } from '../database/entities/index.js';
 import type {
   JiraChangelogEntry,
   JiraIssueValue,
+  JiraIssueLink as JiraIssueLinkType,
 } from '../jira/jira.types.js';
 
 @Injectable()
@@ -42,6 +44,8 @@ export class SyncService {
     private readonly roadmapConfigRepo: Repository<RoadmapConfig>,
     @InjectRepository(JpdIdea)
     private readonly jpdIdeaRepo: Repository<JpdIdea>,
+    @InjectRepository(JiraIssueLink)
+    private readonly issueLinkRepo: Repository<JiraIssueLink>,
   ) {}
 
   @Cron('0 */30 * * * *')
@@ -170,6 +174,7 @@ export class SyncService {
     // Fetch recent issues for the Kanban project via JQL
     const jql = `project = ${boardId} ORDER BY updated DESC`;
     const allIssues: JiraIssue[] = [];
+    const allRawIssues: JiraIssueValue[] = [];
     let nextPageToken: string | undefined;
 
     do {
@@ -179,6 +184,7 @@ export class SyncService {
         this.mapJiraIssue(i, boardId, null),
       );
       allIssues.push(...issues);
+      allRawIssues.push(...response.issues);
       nextPageToken = response.nextPageToken;
       // Cap at 1000 issues per Kanban board to avoid excessive API calls
       if (allIssues.length >= 1000) break;
@@ -186,6 +192,7 @@ export class SyncService {
 
     if (allIssues.length > 0) {
       await this.issueRepo.upsert(allIssues, ['key']);
+      await this.persistIssueLinks(allRawIssues);
     }
 
     return allIssues;
@@ -217,6 +224,7 @@ export class SyncService {
     sprintId: string,
   ): Promise<JiraIssue[]> {
     const allIssues: JiraIssue[] = [];
+    const allRawIssues: JiraIssueValue[] = [];
     let startAt = 0;
     let total = 0;
 
@@ -232,11 +240,13 @@ export class SyncService {
         this.mapJiraIssue(i, boardId, sprintId),
       );
       allIssues.push(...issues);
+      allRawIssues.push(...response.issues);
       startAt += response.maxResults;
     } while (startAt < total);
 
     if (allIssues.length > 0) {
       await this.issueRepo.upsert(allIssues, ['key']);
+      await this.persistIssueLinks(allRawIssues);
     }
 
     return allIssues;
@@ -257,6 +267,7 @@ export class SyncService {
         ? raw.fields.fixVersions[0].name
         : null;
     issue.labels = raw.fields.labels ?? [];
+    issue.priority = raw.fields.priority?.name ?? null;
     issue.boardId = boardId;
     issue.sprintId = sprintId;
     issue.createdAt = new Date(raw.fields.created);
@@ -290,6 +301,43 @@ export class SyncService {
     }
 
     return issue;
+  }
+
+  private async persistIssueLinks(rawIssues: JiraIssueValue[]): Promise<void> {
+    for (const raw of rawIssues) {
+      const links = raw.fields.issuelinks;
+      if (!links || links.length === 0) continue;
+
+      // Delete existing links for this issue key (scoped — no unbounded query)
+      await this.issueLinkRepo.delete({ sourceIssueKey: raw.key });
+
+      const newLinks: JiraIssueLink[] = [];
+
+      for (const link of links as JiraIssueLinkType[]) {
+        if (link.inwardIssue) {
+          const entity = this.issueLinkRepo.create({
+            sourceIssueKey: raw.key,
+            targetIssueKey: link.inwardIssue.key,
+            linkTypeName: link.type.name,
+            isInward: true,
+          });
+          newLinks.push(entity);
+        }
+        if (link.outwardIssue) {
+          const entity = this.issueLinkRepo.create({
+            sourceIssueKey: raw.key,
+            targetIssueKey: link.outwardIssue.key,
+            linkTypeName: link.type.name,
+            isInward: false,
+          });
+          newLinks.push(entity);
+        }
+      }
+
+      if (newLinks.length > 0) {
+        await this.issueLinkRepo.save(newLinks);
+      }
+    }
   }
 
   private async syncChangelogsBulk(issueKeys: string[]): Promise<void> {

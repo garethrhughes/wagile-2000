@@ -28,4 +28,7 @@ export class BoardConfig {
 
   @Column('simple-json', { default: '[]' })
   incidentLabels!: string[];
+
+  @Column({ type: 'simple-json', default: '["Critical"]' })
+  incidentPriorities!: string[];
 }

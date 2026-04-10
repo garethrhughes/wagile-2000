@@ -43,6 +43,7 @@ export class MttrService {
       'Resolved',
     ];
     const incidentLabels = config?.incidentLabels ?? [];
+    const incidentPriorities = config?.incidentPriorities ?? ['Critical'];
 
     // Get incident issues for this board
     const allIssues = await this.issueRepo.find({
@@ -58,7 +59,17 @@ export class MttrService {
       return isIncidentType || hasIncidentLabel;
     });
 
-    if (incidentIssues.length === 0) {
+    // AND-gate: filter by priority if incidentPriorities is non-empty
+    const priorityFilteredIssues =
+      incidentPriorities.length > 0
+        ? incidentIssues.filter(
+            (issue) =>
+              issue.priority !== null &&
+              incidentPriorities.includes(issue.priority),
+          )
+        : incidentIssues;
+
+    if (priorityFilteredIssues.length === 0) {
       return {
         boardId,
         medianHours: 0,
@@ -67,7 +78,7 @@ export class MttrService {
       };
     }
 
-    const incidentKeys = incidentIssues.map((i) => i.key);
+    const incidentKeys = priorityFilteredIssues.map((i) => i.key);
 
     // Get all status changelogs for incident issues (in period for recovery,
     // but we also need pre-period In Progress transitions for start time)
@@ -108,7 +119,7 @@ export class MttrService {
     // undercounting when tickets are created hours after the incident starts
     // being actively worked — measuring ticket lifecycle rather than wall-clock
     // discovery time.
-    const issueMap = new Map(incidentIssues.map((i) => [i.key, i]));
+    const issueMap = new Map(priorityFilteredIssues.map((i) => [i.key, i]));
     const recoveryHours: number[] = [];
 
     for (const [issueKey, recoveryDate] of firstRecoveryByIssue) {

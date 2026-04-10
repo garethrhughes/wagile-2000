@@ -37,6 +37,9 @@ export class JiraIssue {
   @Column('simple-json', { default: '[]' })
   labels!: string[];
 
+  @Column({ type: 'varchar', nullable: true, default: null })
+  priority!: string | null;
+
   @Column({ type: 'timestamptz' })
   createdAt!: Date;
 

@@ -12,6 +12,7 @@ import {
   JiraVersion,
   JiraSprint,
   BoardConfig,
+  JiraIssueLink,
 } from '../database/entities/index.js';
 
 @Module({
@@ -22,6 +23,7 @@ import {
       JiraVersion,
       JiraSprint,
       BoardConfig,
+      JiraIssueLink,
     ]),
   ],
   controllers: [MetricsController],

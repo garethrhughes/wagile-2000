@@ -42,7 +42,7 @@ export class JiraClientService {
   ): Promise<JiraIssueSearchResponse> {
     const url =
       `${this.baseUrl}/rest/agile/1.0/board/${boardId}/sprint/${sprintId}/issue` +
-      `?maxResults=100&startAt=${startAt}&fields=summary,status,issuetype,fixVersions,labels,created,updated,issuelinks,parent` +
+      `?maxResults=100&startAt=${startAt}&fields=summary,status,issuetype,fixVersions,labels,created,updated,issuelinks,parent,priority` +
       `&expand=names`;
     return this.fetchWithRetry<JiraIssueSearchResponse>(url);
   }
@@ -71,7 +71,7 @@ export class JiraClientService {
     const params = new URLSearchParams({
       jql,
       maxResults: String(maxResults),
-      fields: 'summary,status,issuetype,fixVersions,labels,created,updated,issuelinks,parent',
+      fields: 'summary,status,issuetype,fixVersions,labels,created,updated,issuelinks,parent,priority',
     });
     if (nextPageToken) {
       params.set('nextPageToken', nextPageToken);

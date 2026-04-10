@@ -26,3 +26,4 @@ a new ADR is created for the replacement decision.
 | [0012](0012-roadmap-accuracy-query-correctness-scoped-ideas-and-n-plus-one-fix.md) | Roadmap accuracy query correctness: scoped idea loading and N+1 elimination | Accepted | 2026-04-10 |
 | [0013](0013-board-id-required-on-accuracy-endpoint.md) | `boardId` made required on the roadmap accuracy endpoint | Accepted | 2026-04-10 |
 | [0014](0014-sprint-detail-view.md) | Sprint Detail View: new SprintModule with per-issue annotation endpoint | Accepted | 2026-04-10 |
+| [0015](0015-board-config-as-metric-filter-composition-point.md) | BoardConfig as the sole composition point for metric filter rules | Proposed | 2026-04-10 |

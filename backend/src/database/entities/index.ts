@@ -6,3 +6,4 @@ export { JiraVersion } from './jira-version.entity.js';
 export { SyncLog } from './sync-log.entity.js';
 export { RoadmapConfig } from './roadmap-config.entity.js';
 export { JpdIdea } from './jpd-idea.entity.js';
+export { JiraIssueLink } from './jira-issue-link.entity.js';

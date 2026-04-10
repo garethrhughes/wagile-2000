@@ -5,6 +5,7 @@ import {
   JiraChangelog,
   JiraVersion,
   BoardConfig,
+  JiraIssueLink,
 } from '../database/entities/index.js';
 
 function mockRepo<T>(): jest.Mocked<Repository<T>> {
@@ -16,6 +17,7 @@ function mockRepo<T>(): jest.Mocked<Repository<T>> {
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       getRawMany: jest.fn().mockResolvedValue([]),
+      getMany: jest.fn().mockResolvedValue([]),
     }),
   } as unknown as jest.Mocked<Repository<T>>;
 }
@@ -26,18 +28,21 @@ describe('CfrService', () => {
   let changelogRepo: jest.Mocked<Repository<JiraChangelog>>;
   let versionRepo: jest.Mocked<Repository<JiraVersion>>;
   let boardConfigRepo: jest.Mocked<Repository<BoardConfig>>;
+  let issueLinkRepo: jest.Mocked<Repository<JiraIssueLink>>;
 
   beforeEach(() => {
     issueRepo = mockRepo<JiraIssue>();
     changelogRepo = mockRepo<JiraChangelog>();
     versionRepo = mockRepo<JiraVersion>();
     boardConfigRepo = mockRepo<BoardConfig>();
+    issueLinkRepo = mockRepo<JiraIssueLink>();
 
     service = new CfrService(
       issueRepo,
       changelogRepo,
       versionRepo,
       boardConfigRepo,
+      issueLinkRepo,
     );
   });
 
@@ -93,9 +98,21 @@ describe('CfrService', () => {
       getRawMany: jest.fn().mockResolvedValue(
         Array.from({ length: 10 }, (_, i) => ({ issueKey: `ACC-${i + 1}` })),
       ),
+      getMany: jest.fn().mockResolvedValue([]),
     };
     changelogRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
     versionRepo.find.mockResolvedValue([]);
+
+    // Both Bug issues have a causal link
+    const linkQb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([
+        { sourceIssueKey: 'ACC-1', targetIssueKey: 'ACC-99', linkTypeName: 'caused by', isInward: true },
+        { sourceIssueKey: 'ACC-2', targetIssueKey: 'ACC-98', linkTypeName: 'caused by', isInward: true },
+      ]),
+    };
+    issueLinkRepo.createQueryBuilder = jest.fn().mockReturnValue(linkQb);
 
     const result = await service.calculate('ACC', start, end);
 
@@ -137,9 +154,20 @@ describe('CfrService', () => {
       getRawMany: jest.fn().mockResolvedValue(
         [{ issueKey: 'ACC-1' }, { issueKey: 'ACC-2' }, { issueKey: 'ACC-3' }, { issueKey: 'ACC-4' }],
       ),
+      getMany: jest.fn().mockResolvedValue([]),
     };
     changelogRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
     versionRepo.find.mockResolvedValue([]);
+
+    // The regression-labelled issue has a causal link
+    const linkQb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([
+        { sourceIssueKey: 'ACC-1', targetIssueKey: 'ACC-99', linkTypeName: 'caused by', isInward: true },
+      ]),
+    };
+    issueLinkRepo.createQueryBuilder = jest.fn().mockReturnValue(linkQb);
 
     const result = await service.calculate('ACC', start, end);
 
