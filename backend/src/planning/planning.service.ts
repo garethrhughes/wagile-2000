@@ -31,6 +31,17 @@ export interface QuarterInfo {
   endDate: string;
 }
 
+export interface KanbanQuarterSummary {
+  quarter: string;
+  state: string; // 'active' | 'closed'
+  issuesPulledIn: number;
+  completed: number;
+  addedMidQuarter: number;
+  pointsIn: number;
+  pointsDone: number;
+  deliveryRate: number; // 0–100
+}
+
 @Injectable()
 export class PlanningService {
   private readonly logger = new Logger(PlanningService.name);
@@ -428,6 +439,122 @@ export class PlanningService {
     return [...quarters.values()].sort((a, b) =>
       b.quarter.localeCompare(a.quarter),
     );
+  }
+
+  async getKanbanQuarters(boardId: string): Promise<KanbanQuarterSummary[]> {
+    // Verify this is actually a Kanban board
+    const config = await this.boardConfigRepo.findOne({ where: { boardId } });
+    if (!config || config.boardType !== 'kanban') {
+      throw new BadRequestException(
+        `Board ${boardId} is not a Kanban board`,
+      );
+    }
+
+    const doneStatuses: string[] = config.doneStatusNames ?? ['Done', 'Closed', 'Released'];
+
+    // Load all issues for this board, excluding Epics and Sub-tasks
+    const allIssues = (
+      await this.issueRepo.find({ where: { boardId } })
+    ).filter((i) => i.issueType !== 'Epic' && i.issueType !== 'Sub-task');
+
+    if (allIssues.length === 0) {
+      return [];
+    }
+
+    // Bulk-load the earliest "To Do → *" changelog for each issue
+    // (board-entry date — same logic as RoadmapService.getKanbanAccuracy)
+    const issueKeys = allIssues.map((i) => i.key);
+    const boardEntryChangelogs = await this.changelogRepo
+      .createQueryBuilder('cl')
+      .where('cl.issueKey IN (:...keys)', { keys: issueKeys })
+      .andWhere('cl.field = :field', { field: 'status' })
+      .andWhere('cl.fromValue = :from', { from: 'To Do' })
+      .orderBy('cl.changedAt', 'ASC')
+      .getMany();
+
+    // issueKey → earliest date it left "To Do"
+    const boardEntryDate = new Map<string, Date>();
+    for (const cl of boardEntryChangelogs) {
+      if (!boardEntryDate.has(cl.issueKey)) {
+        boardEntryDate.set(cl.issueKey, cl.changedAt);
+      }
+    }
+
+    // Bucket issues by the quarter of their board-entry date (fall back to createdAt)
+    const quarterMap = new Map<string, typeof allIssues>();
+    for (const issue of allIssues) {
+      const entryDate = boardEntryDate.get(issue.key) ?? issue.createdAt;
+      const key = this.dateToQuarterKey(entryDate);
+      const list = quarterMap.get(key) ?? [];
+      list.push(issue);
+      quarterMap.set(key, list);
+    }
+
+    const now = new Date();
+    const currentQuarterKey = this.dateToQuarterKey(now);
+
+    // For each quarter, derive per-issue "completed" and "addedMidQuarter" flags.
+    // "addedMidQuarter" = board-entry date is after the 14-day grace period from quarter start.
+    const results: KanbanQuarterSummary[] = [];
+
+    const sortedKeys = Array.from(quarterMap.keys()).sort((a, b) =>
+      b.localeCompare(a),
+    );
+
+    for (const qKey of sortedKeys) {
+      const issues = quarterMap.get(qKey)!;
+      const { startDate } = this.quarterToDates(qKey);
+      const gracePeriodEnd = new Date(
+        startDate.getTime() + 14 * 24 * 60 * 60 * 1000,
+      );
+      const state = qKey === currentQuarterKey ? 'active' : 'closed';
+
+      let completed = 0;
+      let addedMidQuarter = 0;
+      let pointsIn = 0;
+      let pointsDone = 0;
+
+      for (const issue of issues) {
+        const pts = issue.points ?? 0;
+        pointsIn += pts;
+
+        // Completed = currently in a done status
+        if (doneStatuses.includes(issue.status)) {
+          completed++;
+          pointsDone += pts;
+        }
+
+        // Mid-quarter = board-entry date is after the grace period
+        const entryDate = boardEntryDate.get(issue.key) ?? issue.createdAt;
+        if (entryDate > gracePeriodEnd) {
+          addedMidQuarter++;
+        }
+      }
+
+      const issuesPulledIn = issues.length;
+      const deliveryRate =
+        issuesPulledIn > 0
+          ? Math.round((completed / issuesPulledIn) * 10000) / 100
+          : 0;
+
+      results.push({
+        quarter: qKey,
+        state,
+        issuesPulledIn,
+        completed,
+        addedMidQuarter,
+        pointsIn,
+        pointsDone,
+        deliveryRate,
+      });
+    }
+
+    return results;
+  }
+
+  private dateToQuarterKey(date: Date): string {
+    const q = Math.floor(date.getMonth() / 3) + 1;
+    return `${date.getFullYear()}-Q${q}`;
   }
 
   private quarterToDates(quarter: string): {

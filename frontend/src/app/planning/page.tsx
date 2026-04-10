@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import {
   ResponsiveContainer,
   LineChart,
@@ -15,8 +15,9 @@ import {
 import type { ValueType, NameType } from 'recharts/types/component/DefaultTooltipContent';
 import {
   getPlanningAccuracy,
+  getKanbanQuarters,
   type SprintAccuracy,
-  ApiError,
+  type KanbanQuarterSummary,
 } from '@/lib/api';
 import { ALL_BOARDS } from '@/store/filter-store';
 import { BoardChip } from '@/components/ui/board-chip';
@@ -48,7 +49,7 @@ function getCurrentQuarterKey(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Quarter row type (for quarter-mode table)
+// Quarter row type (for quarter-mode table on Scrum boards)
 // ---------------------------------------------------------------------------
 
 interface QuarterRow {
@@ -80,7 +81,6 @@ function groupByQuarter(sprints: SprintAccuracy[]): QuarterRow[] {
     const added = group.reduce((acc, s) => acc + s.added, 0);
     const removed = group.reduce((acc, s) => acc + s.removed, 0);
     const completed = group.reduce((acc, s) => acc + s.completed, 0);
-    // Recalculate from totals for consistency
     const effectiveScope = commitment + added - removed;
     const scopeChangePercent =
       commitment > 0
@@ -127,17 +127,21 @@ function quarterRowColor(row: QuarterRow): string {
   return '';
 }
 
+function kanbanRowColor(row: KanbanQuarterSummary): string {
+  if (row.deliveryRate < 50) return 'bg-red-50';
+  if (row.deliveryRate < 80) return 'bg-amber-50';
+  return '';
+}
+
 // ---------------------------------------------------------------------------
 // Abbreviated sprint/quarter label for chart x-axis
 // ---------------------------------------------------------------------------
 
 function abbreviateLabel(name: string): string {
-  // e.g. "ACC Sprint 23 (Jan 2025)" → "SP 23" or quarter "2025-Q1" → "Q1 '25"
   const qMatch = name.match(/^(\d{4})-Q([1-4])$/);
   if (qMatch) {
     return `Q${qMatch[2]} '${qMatch[1].slice(2)}`;
   }
-  // Try to grab a number from the sprint name
   const numMatch = name.match(/(\d+)/);
   if (numMatch) {
     return `SP ${numMatch[1]}`;
@@ -213,28 +217,21 @@ export default function PlanningPage() {
   const [periodType, setPeriodType] = useState<'sprint' | 'quarter'>('sprint');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [kanbanError, setKanbanError] = useState(false);
   const [rawData, setRawData] = useState<SprintAccuracy[]>([]);
+  const [kanbanData, setKanbanData] = useState<KanbanQuarterSummary[]>([]);
 
   const isKanban = KANBAN_BOARDS.has(selectedBoard);
 
   const handleSelectBoard = useCallback((boardId: string) => {
-    if (KANBAN_BOARDS.has(boardId)) return;
     setSelectedBoard(boardId);
     setRawData([]);
+    setKanbanData([]);
     setError(null);
-    setKanbanError(false);
   }, []);
 
-  // Fetch all non-future sprints whenever board changes
+  // Fetch sprint data for Scrum boards
   useEffect(() => {
-    if (isKanban) {
-      setKanbanError(true);
-      setRawData([]);
-      return;
-    }
-
-    setKanbanError(false);
+    if (isKanban) return;
 
     let cancelled = false;
     setLoading(true);
@@ -246,14 +243,8 @@ export default function PlanningPage() {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          if (err instanceof ApiError && err.status === 400) {
-            setKanbanError(true)
-          } else {
-            setError(
-              err instanceof Error ? err.message : 'Failed to load planning data',
-            )
-          }
-          setRawData([])
+          setError(err instanceof Error ? err.message : 'Failed to load planning data');
+          setRawData([]);
         }
       })
       .finally(() => {
@@ -265,15 +256,41 @@ export default function PlanningPage() {
     };
   }, [selectedBoard, isKanban]);
 
-  // Quarter rows derived client-side from raw sprint data
+  // Fetch quarterly flow data for Kanban boards
+  useEffect(() => {
+    if (!isKanban) return;
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    getKanbanQuarters(selectedBoard)
+      .then((res) => {
+        if (!cancelled) setKanbanData(res ?? []);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load Kanban flow data');
+          setKanbanData([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBoard, isKanban]);
+
+  // Quarter rows derived client-side from raw sprint data (Scrum)
   const quarterRows = useMemo(() => groupByQuarter(rawData), [rawData]);
 
-  // Summary stats across ALL displayed rows
+  // ---------------------------------------------------------------------------
+  // Scrum summary stats
+  // ---------------------------------------------------------------------------
   const { avgScopeChange, avgCompletion } = useMemo(() => {
-    const rows =
-      periodType === 'quarter'
-        ? quarterRows
-        : rawData;
+    const rows = periodType === 'quarter' ? quarterRows : rawData;
     if (rows.length === 0) return { avgScopeChange: 0, avgCompletion: 0 };
     const totalScope = rows.reduce((s, r) => s + r.scopeChangePercent, 0);
     const totalComp = rows.reduce((s, r) => s + r.completionRate, 0);
@@ -283,44 +300,62 @@ export default function PlanningPage() {
     };
   }, [rawData, quarterRows, periodType]);
 
-  // Chart data — oldest on left → newest on right (reverse the display order)
-  const chartData = useMemo<ChartDataPoint[][]>(() => {
-    if (periodType === 'sprint') {
-      // rawData is active-first then closed-desc; reverse for chronological
-      const chronological = [...rawData].reverse();
-      const commitment: ChartDataPoint[] = chronological.map((s) => ({
-        label: abbreviateLabel(s.sprintName),
-        value: s.commitment,
-      }));
-      const completed: ChartDataPoint[] = chronological.map((s) => ({
-        label: abbreviateLabel(s.sprintName),
-        value: s.completed,
-      }));
-      const scopeChange: ChartDataPoint[] = chronological.map((s) => ({
-        label: abbreviateLabel(s.sprintName),
-        value: s.scopeChangePercent,
-      }));
-      return [commitment, completed, scopeChange];
-    } else {
-      // quarterRows is current-first then descending; reverse for chronological
-      const chronological = [...quarterRows].reverse();
-      const commitment: ChartDataPoint[] = chronological.map((q) => ({
-        label: abbreviateLabel(q.quarter),
-        value: q.commitment,
-      }));
-      const completed: ChartDataPoint[] = chronological.map((q) => ({
-        label: abbreviateLabel(q.quarter),
-        value: q.completed,
-      }));
-      const scopeChange: ChartDataPoint[] = chronological.map((q) => ({
-        label: abbreviateLabel(q.quarter),
-        value: q.scopeChangePercent,
-      }));
-      return [commitment, completed, scopeChange];
-    }
-  }, [rawData, quarterRows, periodType]);
+  // ---------------------------------------------------------------------------
+  // Kanban summary stats
+  // ---------------------------------------------------------------------------
+  const { avgDeliveryRate, totalDelivered } = useMemo(() => {
+    if (kanbanData.length === 0) return { avgDeliveryRate: 0, totalDelivered: 0 };
+    const rate = kanbanData.reduce((s, r) => s + r.deliveryRate, 0) / kanbanData.length;
+    const delivered = kanbanData.reduce((s, r) => s + r.completed, 0);
+    return { avgDeliveryRate: rate, totalDelivered: delivered };
+  }, [kanbanData]);
 
-  // Sprint-mode table columns
+  // ---------------------------------------------------------------------------
+  // Chart data
+  // ---------------------------------------------------------------------------
+  const chartData = useMemo<ChartDataPoint[][]>(() => {
+    if (isKanban) {
+      // Kanban: chronological order (oldest first)
+      const chronological = [...kanbanData].reverse();
+      return [
+        chronological.map((q) => ({ label: abbreviateLabel(q.quarter), value: q.issuesPulledIn })),
+        chronological.map((q) => ({ label: abbreviateLabel(q.quarter), value: q.completed })),
+        chronological.map((q) => ({ label: abbreviateLabel(q.quarter), value: q.deliveryRate })),
+      ];
+    }
+    if (periodType === 'sprint') {
+      const chronological = [...rawData].reverse();
+      return [
+        chronological.map((s) => ({ label: abbreviateLabel(s.sprintName), value: s.commitment })),
+        chronological.map((s) => ({ label: abbreviateLabel(s.sprintName), value: s.completed })),
+        chronological.map((s) => ({ label: abbreviateLabel(s.sprintName), value: s.scopeChangePercent })),
+      ];
+    }
+    const chronological = [...quarterRows].reverse();
+    return [
+      chronological.map((q) => ({ label: abbreviateLabel(q.quarter), value: q.commitment })),
+      chronological.map((q) => ({ label: abbreviateLabel(q.quarter), value: q.completed })),
+      chronological.map((q) => ({ label: abbreviateLabel(q.quarter), value: q.scopeChangePercent })),
+    ];
+  }, [isKanban, kanbanData, rawData, quarterRows, periodType]);
+
+  // ---------------------------------------------------------------------------
+  // Table columns
+  // ---------------------------------------------------------------------------
+
+  const stateChip = (value: unknown) => {
+    const state = String(value);
+    const color =
+      state === 'active'
+        ? 'text-green-600 bg-green-50'
+        : 'text-gray-600 bg-gray-100';
+    return (
+      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium capitalize ${color}`}>
+        {state}
+      </span>
+    );
+  };
+
   const sprintColumns = useMemo<Column<SprintAccuracy>[]>(
     () => [
       {
@@ -340,22 +375,7 @@ export default function PlanningPage() {
         key: 'state',
         label: 'State',
         sortable: true,
-        render: (value) => {
-          const state = String(value);
-          const color =
-            state === 'active'
-              ? 'text-green-600 bg-green-50'
-              : state === 'closed'
-                ? 'text-gray-600 bg-gray-100'
-                : 'text-blue-600 bg-blue-50';
-          return (
-            <span
-              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium capitalize ${color}`}
-            >
-              {state}
-            </span>
-          );
-        },
+        render: stateChip,
       },
       { key: 'commitment', label: 'Commitment', sortable: true },
       { key: 'added', label: 'Added', sortable: true },
@@ -367,12 +387,7 @@ export default function PlanningPage() {
         sortable: true,
         render: (value) => {
           const pct = Number(value);
-          const color =
-            pct > 40
-              ? 'text-red-600 font-semibold'
-              : pct > 20
-                ? 'text-amber-600 font-semibold'
-                : '';
+          const color = pct > 40 ? 'text-red-600 font-semibold' : pct > 20 ? 'text-amber-600 font-semibold' : '';
           return <span className={color}>{pct.toFixed(1)}%</span>;
         },
       },
@@ -386,7 +401,6 @@ export default function PlanningPage() {
     [selectedBoard],
   );
 
-  // Quarter-mode table columns
   const quarterColumns = useMemo<Column<QuarterRow>[]>(
     () => [
       {
@@ -412,12 +426,7 @@ export default function PlanningPage() {
         sortable: true,
         render: (value) => {
           const pct = Number(value);
-          const color =
-            pct > 40
-              ? 'text-red-600 font-semibold'
-              : pct > 20
-                ? 'text-amber-600 font-semibold'
-                : '';
+          const color = pct > 40 ? 'text-red-600 font-semibold' : pct > 20 ? 'text-amber-600 font-semibold' : '';
           return <span className={color}>{pct.toFixed(1)}%</span>;
         },
       },
@@ -431,8 +440,60 @@ export default function PlanningPage() {
     [selectedBoard],
   );
 
-  const hasData =
-    periodType === 'sprint' ? rawData.length > 0 : quarterRows.length > 0;
+  const kanbanColumns = useMemo<Column<KanbanQuarterSummary>[]>(
+    () => [
+      {
+        key: 'quarter',
+        label: 'Quarter',
+        sortable: true,
+        render: (value) => (
+          <Link
+            href={`/quarter/${encodeURIComponent(selectedBoard)}/${encodeURIComponent(String(value))}?from=planning`}
+            className="font-medium text-blue-600 hover:underline"
+          >
+            {String(value)}
+          </Link>
+        ),
+      },
+      {
+        key: 'state',
+        label: 'State',
+        sortable: true,
+        render: stateChip,
+      },
+      { key: 'issuesPulledIn', label: 'Pulled In', sortable: true },
+      { key: 'completed', label: 'Completed', sortable: true },
+      { key: 'addedMidQuarter', label: 'Mid-Quarter', sortable: true },
+      { key: 'pointsIn', label: 'Points In', sortable: true },
+      { key: 'pointsDone', label: 'Points Done', sortable: true },
+      {
+        key: 'deliveryRate',
+        label: 'Delivery Rate',
+        sortable: true,
+        render: (value) => {
+          const pct = Number(value);
+          const color = pct < 50 ? 'text-red-600 font-semibold' : pct < 80 ? 'text-amber-600 font-semibold' : 'text-green-700 font-semibold';
+          return <span className={color}>{pct.toFixed(1)}%</span>;
+        },
+      },
+    ],
+    [selectedBoard],
+  );
+
+  // ---------------------------------------------------------------------------
+  // Derived flags
+  // ---------------------------------------------------------------------------
+  const hasData = isKanban
+    ? kanbanData.length > 0
+    : periodType === 'sprint'
+      ? rawData.length > 0
+      : quarterRows.length > 0;
+
+  const rowCount = isKanban
+    ? kanbanData.length
+    : periodType === 'sprint'
+      ? rawData.length
+      : quarterRows.length;
 
   return (
     <div className="space-y-6">
@@ -440,13 +501,15 @@ export default function PlanningPage() {
       <div>
         <h1 className="text-2xl font-bold">Planning Accuracy</h1>
         <p className="mt-1 text-sm text-muted">
-          Sprint commitment vs delivery metrics
+          {isKanban
+            ? 'Quarterly flow metrics — issues pulled in vs delivered'
+            : 'Sprint commitment vs delivery metrics'}
         </p>
       </div>
 
       {/* Filters */}
       <div className="space-y-4 rounded-xl border border-border bg-card p-4">
-        {/* Board selector (single-select) */}
+        {/* Board selector */}
         <div>
           <label className="mb-2 block text-sm font-medium text-muted">
             Board
@@ -457,52 +520,45 @@ export default function PlanningPage() {
                 key={boardId}
                 boardId={boardId}
                 selected={selectedBoard === boardId}
-                disabled={KANBAN_BOARDS.has(boardId)}
                 onClick={() => handleSelectBoard(boardId)}
               />
             ))}
           </div>
         </div>
 
-        {/* Period type toggle — no selector dropdowns */}
-        <div>
-          <label className="mb-2 block text-sm font-medium text-muted">
-            Period
-          </label>
-          <div className="inline-flex rounded-lg border border-border">
-            <button
-              type="button"
-              onClick={() => setPeriodType('sprint')}
-              className={`rounded-l-lg px-4 py-2 text-sm font-medium transition-colors ${
-                periodType === 'sprint'
-                  ? 'bg-blue-50 text-blue-700'
-                  : 'text-muted hover:bg-gray-50'
-              }`}
-            >
-              Sprint
-            </button>
-            <button
-              type="button"
-              onClick={() => setPeriodType('quarter')}
-              className={`rounded-r-lg px-4 py-2 text-sm font-medium transition-colors ${
-                periodType === 'quarter'
-                  ? 'bg-blue-50 text-blue-700'
-                  : 'text-muted hover:bg-gray-50'
-              }`}
-            >
-              Quarter
-            </button>
+        {/* Period type toggle — hidden for Kanban (quarterly only) */}
+        {!isKanban && (
+          <div>
+            <label className="mb-2 block text-sm font-medium text-muted">
+              Period
+            </label>
+            <div className="inline-flex rounded-lg border border-border">
+              <button
+                type="button"
+                onClick={() => setPeriodType('sprint')}
+                className={`rounded-l-lg px-4 py-2 text-sm font-medium transition-colors ${
+                  periodType === 'sprint'
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'text-muted hover:bg-gray-50'
+                }`}
+              >
+                Sprint
+              </button>
+              <button
+                type="button"
+                onClick={() => setPeriodType('quarter')}
+                className={`rounded-r-lg px-4 py-2 text-sm font-medium transition-colors ${
+                  periodType === 'quarter'
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'text-muted hover:bg-gray-50'
+                }`}
+              >
+                Quarter
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
-
-      {/* Kanban warning */}
-      {kanbanError && (
-        <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-          <AlertCircle className="h-5 w-5 flex-shrink-0" />
-          Planning accuracy is not available for Kanban boards.
-        </div>
-      )}
 
       {/* Loading */}
       {loading && (
@@ -522,52 +578,68 @@ export default function PlanningPage() {
         <>
           {/* Summary stats */}
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="rounded-xl border border-border bg-card p-5">
-              <h3 className="text-sm font-medium text-muted">
-                Avg Scope Change
-              </h3>
-              <p className="mt-2 text-3xl font-bold">
-                {avgScopeChange.toFixed(1)}%
-              </p>
-              <p className="mt-1 text-xs text-muted">
-                across all {periodType === 'sprint' ? `${rawData.length} sprint${rawData.length !== 1 ? 's' : ''}` : `${quarterRows.length} quarter${quarterRows.length !== 1 ? 's' : ''}`}
-              </p>
-            </div>
-            <div className="rounded-xl border border-border bg-card p-5">
-              <h3 className="text-sm font-medium text-muted">
-                Avg Completion Rate
-              </h3>
-              <p className="mt-2 text-3xl font-bold">
-                {avgCompletion.toFixed(1)}%
-              </p>
-              <p className="mt-1 text-xs text-muted">
-                across all {periodType === 'sprint' ? `${rawData.length} sprint${rawData.length !== 1 ? 's' : ''}` : `${quarterRows.length} quarter${quarterRows.length !== 1 ? 's' : ''}`}
-              </p>
-            </div>
+            {isKanban ? (
+              <>
+                <div className="rounded-xl border border-border bg-card p-5">
+                  <h3 className="text-sm font-medium text-muted">Avg Delivery Rate</h3>
+                  <p className="mt-2 text-3xl font-bold">{avgDeliveryRate.toFixed(1)}%</p>
+                  <p className="mt-1 text-xs text-muted">
+                    across {rowCount} quarter{rowCount !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-border bg-card p-5">
+                  <h3 className="text-sm font-medium text-muted">Total Issues Delivered</h3>
+                  <p className="mt-2 text-3xl font-bold">{totalDelivered}</p>
+                  <p className="mt-1 text-xs text-muted">
+                    across {rowCount} quarter{rowCount !== 1 ? 's' : ''}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="rounded-xl border border-border bg-card p-5">
+                  <h3 className="text-sm font-medium text-muted">Avg Scope Change</h3>
+                  <p className="mt-2 text-3xl font-bold">{avgScopeChange.toFixed(1)}%</p>
+                  <p className="mt-1 text-xs text-muted">
+                    across all {periodType === 'sprint' ? `${rawData.length} sprint${rawData.length !== 1 ? 's' : ''}` : `${quarterRows.length} quarter${quarterRows.length !== 1 ? 's' : ''}`}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-border bg-card p-5">
+                  <h3 className="text-sm font-medium text-muted">Avg Completion Rate</h3>
+                  <p className="mt-2 text-3xl font-bold">{avgCompletion.toFixed(1)}%</p>
+                  <p className="mt-1 text-xs text-muted">
+                    across all {periodType === 'sprint' ? `${rawData.length} sprint${rawData.length !== 1 ? 's' : ''}` : `${quarterRows.length} quarter${quarterRows.length !== 1 ? 's' : ''}`}
+                  </p>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Trend charts */}
           <div className="grid gap-4 lg:grid-cols-3">
-            <TrendChart
-              title="Commitment"
-              data={chartData[0]}
-              color="#3b82f6"
-            />
-            <TrendChart
-              title="Completed"
-              data={chartData[1]}
-              color="#22c55e"
-            />
-            <TrendChart
-              title="Scope Change %"
-              data={chartData[2]}
-              color="#f59e0b"
-              unit="%"
-            />
+            {isKanban ? (
+              <>
+                <TrendChart title="Issues Pulled In" data={chartData[0]} color="#3b82f6" />
+                <TrendChart title="Issues Completed" data={chartData[1]} color="#22c55e" />
+                <TrendChart title="Delivery Rate %" data={chartData[2]} color="#f59e0b" unit="%" />
+              </>
+            ) : (
+              <>
+                <TrendChart title="Commitment" data={chartData[0]} color="#3b82f6" />
+                <TrendChart title="Completed" data={chartData[1]} color="#22c55e" />
+                <TrendChart title="Scope Change %" data={chartData[2]} color="#f59e0b" unit="%" />
+              </>
+            )}
           </div>
 
           {/* Data table */}
-          {periodType === 'sprint' ? (
+          {isKanban ? (
+            <DataTable<KanbanQuarterSummary>
+              columns={kanbanColumns}
+              data={kanbanData}
+              rowClassName={kanbanRowColor}
+            />
+          ) : periodType === 'sprint' ? (
             <DataTable<SprintAccuracy>
               columns={sprintColumns}
               data={rawData}
@@ -584,10 +656,10 @@ export default function PlanningPage() {
       )}
 
       {/* Empty state */}
-      {!loading && !error && !kanbanError && !hasData && (
+      {!loading && !error && !hasData && (
         <EmptyState
           title="No planning data"
-          message="Select a board to view sprint accuracy."
+          message={isKanban ? 'No quarterly flow data found for this board.' : 'Select a board to view sprint accuracy.'}
         />
       )}
     </div>

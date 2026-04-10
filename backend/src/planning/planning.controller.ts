@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Param,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -40,5 +41,13 @@ export class PlanningController {
   @Get('quarters')
   async getQuarters() {
     return this.planningService.getQuarters();
+  }
+
+  @ApiOperation({
+    summary: 'Get quarterly flow metrics for a Kanban board. Returns 400 for Scrum boards.',
+  })
+  @Get('kanban-quarters/:boardId')
+  async getKanbanQuarters(@Param('boardId') boardId: string) {
+    return this.planningService.getKanbanQuarters(boardId);
   }
 }

@@ -289,6 +289,25 @@ export function getQuarters(): Promise<QuartersResponse> {
   return apiFetch('/api/planning/quarters');
 }
 
+// ---- Kanban quarterly flow metrics ---------------------------------------
+
+export interface KanbanQuarterSummary {
+  quarter: string
+  state: string
+  issuesPulledIn: number
+  completed: number
+  addedMidQuarter: number
+  pointsIn: number
+  pointsDone: number
+  deliveryRate: number
+}
+
+export function getKanbanQuarters(boardId: string): Promise<KanbanQuarterSummary[]> {
+  return apiFetch(
+    `/api/planning/kanban-quarters/${encodeURIComponent(boardId)}`,
+  )
+}
+
 // ---- Roadmap Accuracy types and endpoints --------------------------------
 
 export interface RoadmapConfig {
