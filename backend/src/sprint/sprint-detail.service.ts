@@ -1,0 +1,656 @@
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { In, Repository } from 'typeorm';
+import {
+  BoardConfig,
+  JiraChangelog,
+  JiraIssue,
+  JiraSprint,
+  JpdIdea,
+  RoadmapConfig,
+} from '../database/entities/index.js';
+
+// ---------------------------------------------------------------------------
+// Response interfaces (exported for use by the controller and frontend types)
+// ---------------------------------------------------------------------------
+
+/** Board configuration rules applied to derive per-issue annotations */
+export interface SprintDetailBoardConfig {
+  doneStatusNames: string[];
+  failureIssueTypes: string[];
+  failureLabels: string[];
+  incidentIssueTypes: string[];
+  incidentLabels: string[];
+}
+
+export interface SprintDetailIssue {
+  /** Jira issue key, e.g. "ACC-123" */
+  key: string;
+
+  /** Issue summary / title */
+  summary: string;
+
+  /** Current status at time of last sync */
+  currentStatus: string;
+
+  /** Jira issue type, e.g. "Story", "Bug", "Task" */
+  issueType: string;
+
+  /**
+   * True if the issue was added to the sprint AFTER sprint start
+   * (using the 5-minute grace period defined in PlanningService).
+   */
+  addedMidSprint: boolean;
+
+  /**
+   * True if the issue's epicKey is a member of the coveredEpicKeys set
+   * (i.e. issue.epicKey ∈ any JpdIdea.deliveryIssueKeys, scoped to
+   * configured RoadmapConfig.jpdKey values).
+   */
+  roadmapLinked: boolean;
+
+  /**
+   * True if the issue matches incidentIssueTypes OR incidentLabels
+   * from BoardConfig. This is the MTTR signal.
+   */
+  isIncident: boolean;
+
+  /**
+   * True if the issue matches failureIssueTypes OR failureLabels
+   * from BoardConfig. This is the CFR signal.
+   * Note: link-based failure detection (failureLinkTypes) is excluded.
+   */
+  isFailure: boolean;
+
+  /**
+   * True if the issue transitioned to a doneStatusName between
+   * sprint.startDate and sprint.endDate (inclusive), or if the
+   * issue's current status is already in doneStatusNames.
+   */
+  completedInSprint: boolean;
+
+  /**
+   * Lead time in days, or null if it cannot be computed.
+   * = (firstInProgressTransitionDate OR issue.createdAt) → firstDoneTransitionDate
+   * Negative values (data anomalies) are clamped to null.
+   * Rounded to 2 decimal places.
+   */
+  leadTimeDays: number | null;
+
+  /**
+   * ISO 8601 timestamp of the issue's first done-status transition,
+   * or null if no such transition is found.
+   */
+  resolvedAt: string | null;
+
+  /**
+   * Deep link to the issue in Jira Cloud.
+   * Constructed as: `${JIRA_BASE_URL}/browse/${key}`
+   * Empty string if JIRA_BASE_URL is not configured.
+   */
+  jiraUrl: string;
+}
+
+export interface SprintDetailSummary {
+  /** Count of issues present at sprint start that have not been removed
+   *  (excludes issues removed from the sprint mid-flight) */
+  committedCount: number;
+
+  /** Count of issues added after sprint start */
+  addedMidSprintCount: number;
+
+  /** Count of issues removed during the sprint */
+  removedCount: number;
+
+  /** Count of issues completed within the sprint window */
+  completedInSprintCount: number;
+
+  /** Count of issues linked to a JPD roadmap item */
+  roadmapLinkedCount: number;
+
+  /** Count of issues classified as incidents (MTTR signal) */
+  incidentCount: number;
+
+  /** Count of issues classified as failures (CFR signal) */
+  failureCount: number;
+
+  /** Median lead time in days across completed issues, or null if no completed issues */
+  medianLeadTimeDays: number | null;
+}
+
+export interface SprintDetailResponse {
+  sprintId: string;
+  sprintName: string;
+  state: string;             // 'active' | 'closed' | 'future'
+  startDate: string | null;  // ISO 8601
+  endDate: string | null;    // ISO 8601
+
+  /** The BoardConfig rules applied to derive annotations */
+  boardConfig: SprintDetailBoardConfig;
+
+  /** Aggregate summary bar counts */
+  summary: SprintDetailSummary;
+
+  /**
+   * All issues that were part of this sprint (committed + added - removed).
+   * Epics and Sub-tasks are excluded.
+   * Sorted: incomplete issues first (alphabetical by key), then completed.
+   */
+  issues: SprintDetailIssue[];
+}
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const SPRINT_GRACE_PERIOD_MS = 5 * 60 * 1000; // 5 minutes
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
+@Injectable()
+export class SprintDetailService {
+  private readonly logger = new Logger(SprintDetailService.name);
+  private readonly jiraBaseUrl: string;
+
+  constructor(
+    @InjectRepository(JiraSprint)
+    private readonly sprintRepo: Repository<JiraSprint>,
+    @InjectRepository(JiraIssue)
+    private readonly issueRepo: Repository<JiraIssue>,
+    @InjectRepository(JiraChangelog)
+    private readonly changelogRepo: Repository<JiraChangelog>,
+    @InjectRepository(BoardConfig)
+    private readonly boardConfigRepo: Repository<BoardConfig>,
+    @InjectRepository(JpdIdea)
+    private readonly jpdIdeaRepo: Repository<JpdIdea>,
+    @InjectRepository(RoadmapConfig)
+    private readonly roadmapConfigRepo: Repository<RoadmapConfig>,
+    private readonly configService: ConfigService,
+  ) {
+    const baseUrl = this.configService.get<string>('JIRA_BASE_URL', '');
+    if (!baseUrl) {
+      this.logger.warn(
+        'JIRA_BASE_URL is not configured — jiraUrl fields will be empty strings',
+      );
+    }
+    this.jiraBaseUrl = baseUrl;
+  }
+
+  async getDetail(
+    boardId: string,
+    sprintId: string,
+  ): Promise<SprintDetailResponse> {
+    // -----------------------------------------------------------------------
+    // Query 1: Load sprint
+    // -----------------------------------------------------------------------
+    const sprint = await this.sprintRepo.findOne({
+      where: { id: sprintId, boardId },
+    });
+    if (!sprint) {
+      throw new NotFoundException(
+        `Sprint "${sprintId}" not found on board "${boardId}"`,
+      );
+    }
+
+    // -----------------------------------------------------------------------
+    // Query 2: Load BoardConfig — reject Kanban boards
+    // -----------------------------------------------------------------------
+    const boardConfig = await this.boardConfigRepo.findOne({
+      where: { boardId },
+    });
+    if (boardConfig?.boardType === 'kanban') {
+      throw new BadRequestException(
+        'Sprint detail view is not available for Kanban boards',
+      );
+    }
+
+    const doneStatusNames: string[] = boardConfig?.doneStatusNames ?? [
+      'Done',
+      'Closed',
+      'Released',
+    ];
+    const failureIssueTypes: string[] = boardConfig?.failureIssueTypes ?? [];
+    const failureLabels: string[] = boardConfig?.failureLabels ?? [];
+    const incidentIssueTypes: string[] = boardConfig?.incidentIssueTypes ?? [];
+    const incidentLabels: string[] = boardConfig?.incidentLabels ?? [];
+
+    const boardConfigShape: SprintDetailBoardConfig = {
+      doneStatusNames,
+      failureIssueTypes,
+      failureLabels,
+      incidentIssueTypes,
+      incidentLabels,
+    };
+
+    // -----------------------------------------------------------------------
+    // Query 3: Load all board issues (needed to replay changelogs correctly)
+    // Cannot rely on sprintId column — it stores only the last-synced sprint.
+    // -----------------------------------------------------------------------
+    const allBoardIssues = await this.issueRepo.find({
+      where: { boardId },
+    });
+
+    // Filter out Epics and Sub-tasks immediately
+    const boardIssues = allBoardIssues.filter(
+      (i) => i.issueType !== 'Epic' && i.issueType !== 'Sub-task',
+    );
+
+    if (boardIssues.length === 0) {
+      return this.buildEmptyResponse(sprint, boardConfigShape);
+    }
+
+    const allKeys = boardIssues.map((i) => i.key);
+    const issueByKey = new Map<string, JiraIssue>(
+      boardIssues.map((i) => [i.key, i]),
+    );
+
+    // -----------------------------------------------------------------------
+    // Query 4: Bulk-load Sprint-field changelogs for all board issue keys
+    // -----------------------------------------------------------------------
+    const sprintChangelogs = await this.changelogRepo
+      .createQueryBuilder('cl')
+      .where('cl.issueKey IN (:...keys)', { keys: allKeys })
+      .andWhere('cl.field = :field', { field: 'Sprint' })
+      .orderBy('cl.changedAt', 'ASC')
+      .getMany();
+
+    // -----------------------------------------------------------------------
+    // Sprint membership reconstruction (mirrors PlanningService algorithm)
+    // -----------------------------------------------------------------------
+    const sprintName = sprint.name;
+
+    // Group Sprint-field changelogs by issue, keeping only those that reference
+    // this sprint by name
+    const logsByIssue = new Map<string, JiraChangelog[]>();
+    for (const cl of sprintChangelogs) {
+      if (
+        sprintValueContains(cl.fromValue, sprintName) ||
+        sprintValueContains(cl.toValue, sprintName)
+      ) {
+        const list = logsByIssue.get(cl.issueKey) ?? [];
+        list.push(cl);
+        logsByIssue.set(cl.issueKey, list);
+      }
+    }
+
+    // Include issues currently assigned to this sprint with no changelog
+    // (created directly into the sprint — PlanningService pattern §4b)
+    for (const issue of boardIssues) {
+      if (issue.sprintId === sprint.id && !logsByIssue.has(issue.key)) {
+        logsByIssue.set(issue.key, []);
+      }
+    }
+
+    if (logsByIssue.size === 0) {
+      return this.buildEmptyResponse(sprint, boardConfigShape);
+    }
+
+    // Classify each issue as committed, added, or removed
+    const sprintStart = sprint.startDate;
+    const sprintEnd = sprint.endDate ?? new Date();
+
+    const committedKeys = new Set<string>();
+    const addedKeys = new Set<string>();
+    const removedKeys = new Set<string>();
+
+    if (sprintStart) {
+      const effectiveSprintStart = new Date(
+        sprintStart.getTime() + SPRINT_GRACE_PERIOD_MS,
+      );
+
+      for (const [issueKey, logs] of logsByIssue) {
+        const issue = issueByKey.get(issueKey);
+        const createdAt = issue?.createdAt;
+
+        // Issues with no sprint changelog were assigned at creation.
+        // If created after the grace period, treat as mid-sprint addition.
+        const createdMidSprint =
+          logs.length === 0 &&
+          createdAt != null &&
+          createdAt > effectiveSprintStart;
+
+        const wasAtStart =
+          !createdMidSprint &&
+          wasInSprintAtDate(logs, sprintName, sprintStart);
+
+        let inSprintAtEnd = wasAtStart || createdMidSprint;
+        let wasAddedDuringSprint = createdMidSprint;
+
+        for (const cl of logs) {
+          if (cl.changedAt <= sprintStart) continue;
+          if (cl.changedAt > sprintEnd) break; // ignore post-sprint changes
+
+          if (sprintValueContains(cl.toValue, sprintName)) {
+            if (!inSprintAtEnd && !wasAtStart) {
+              wasAddedDuringSprint = true;
+            }
+            inSprintAtEnd = true;
+          }
+          if (
+            sprintValueContains(cl.fromValue, sprintName) &&
+            !sprintValueContains(cl.toValue, sprintName)
+          ) {
+            inSprintAtEnd = false;
+          }
+        }
+
+        if (wasAtStart) {
+          committedKeys.add(issueKey);
+          if (!inSprintAtEnd) {
+            removedKeys.add(issueKey);
+          }
+        } else if (wasAddedDuringSprint) {
+          addedKeys.add(issueKey);
+          if (!inSprintAtEnd) {
+            removedKeys.add(issueKey);
+          }
+        }
+      }
+    } else {
+      // No start date — treat all issues with changelogs as committed
+      for (const issueKey of logsByIssue.keys()) {
+        committedKeys.add(issueKey);
+      }
+    }
+
+    // Build final issue set: (committed ∪ added) \ removed
+    const finalIssueKeys = new Set<string>([...committedKeys, ...addedKeys]);
+    for (const key of removedKeys) {
+      finalIssueKeys.delete(key);
+    }
+
+    if (finalIssueKeys.size === 0) {
+      return this.buildEmptyResponse(sprint, boardConfigShape);
+    }
+
+    // -----------------------------------------------------------------------
+    // Query 5: Bulk-load status-field changelogs for sprint member issues
+    // -----------------------------------------------------------------------
+    const finalKeys = [...finalIssueKeys];
+    const statusChangelogs = await this.changelogRepo
+      .createQueryBuilder('cl')
+      .where('cl.issueKey IN (:...keys)', { keys: finalKeys })
+      .andWhere('cl.field = :field', { field: 'status' })
+      .orderBy('cl.changedAt', 'ASC')
+      .getMany();
+
+    // Group status changelogs by issue
+    const statusLogsByIssue = new Map<string, JiraChangelog[]>();
+    for (const cl of statusChangelogs) {
+      const list = statusLogsByIssue.get(cl.issueKey) ?? [];
+      list.push(cl);
+      statusLogsByIssue.set(cl.issueKey, list);
+    }
+
+    // -----------------------------------------------------------------------
+    // Queries 6 & 7: Load coveredEpicKeys (RoadmapConfig-scoped)
+    // Replicates RoadmapService.loadCoveredEpicKeys()
+    // -----------------------------------------------------------------------
+    const roadmapConfigs = await this.roadmapConfigRepo.find();
+    let coveredEpicKeys = new Set<string>();
+
+    if (roadmapConfigs.length > 0) {
+      const jpdKeys = roadmapConfigs.map((c) => c.jpdKey);
+      const jpdIdeas = await this.jpdIdeaRepo.find({
+        where: { jpdKey: In(jpdKeys) },
+      });
+      coveredEpicKeys = new Set<string>(
+        jpdIdeas
+          .flatMap((idea) => idea.deliveryIssueKeys ?? [])
+          .filter(Boolean),
+      );
+    }
+
+    // -----------------------------------------------------------------------
+    // Derive per-issue annotations
+    // -----------------------------------------------------------------------
+    const issues: SprintDetailIssue[] = [];
+
+    for (const issueKey of finalIssueKeys) {
+      const issue = issueByKey.get(issueKey);
+      if (!issue) continue;
+
+      const issueLogs = statusLogsByIssue.get(issueKey) ?? [];
+
+      // addedMidSprint
+      const addedMidSprint = addedKeys.has(issueKey);
+
+      // roadmapLinked
+      const roadmapLinked =
+        issue.epicKey !== null && coveredEpicKeys.has(issue.epicKey);
+
+      // isIncident
+      const isIncident =
+        incidentIssueTypes.includes(issue.issueType) ||
+        (incidentLabels.length > 0 &&
+          issue.labels.some((l) => incidentLabels.includes(l)));
+
+      // isFailure
+      const isFailure =
+        failureIssueTypes.includes(issue.issueType) ||
+        issue.labels.some((l) => failureLabels.includes(l));
+
+      // completedInSprint
+      // Case 1 (changelog): a status changelog transitioned TO a done status
+      // within the sprint window (>= startDate guard prevents crediting
+      // completions from a prior sprint).
+      const sprintWindowEnd = sprint.endDate ?? new Date();
+      const completedByChangelog =
+        sprintStart !== null &&
+        issueLogs.some(
+          (cl) =>
+            doneStatusNames.includes(cl.toValue ?? '') &&
+            cl.changedAt >= sprintStart &&
+            cl.changedAt <= sprintWindowEnd,
+        );
+
+      // Case 2 (fallback): no status changelog exists at all (truly truncated
+      // data — issue was created directly in the sprint with no transitions
+      // recorded) and the current status is already in doneStatusNames.
+      // Must NOT fire when changelog exists but done-transition is absent
+      // (e.g. completed in a prior sprint and still showing as done).
+      const completedInSprint =
+        completedByChangelog ||
+        (issueLogs.length === 0 && doneStatusNames.includes(issue.status));
+
+      // leadTimeDays and resolvedAt
+      // Use In Progress → Done; fall back to createdAt → Done
+      const inProgressTransition = issueLogs.find(
+        (cl) => cl.toValue === 'In Progress',
+      );
+      const startTime = inProgressTransition
+        ? inProgressTransition.changedAt
+        : issue.createdAt;
+
+      const doneTransition = issueLogs.find((cl) =>
+        doneStatusNames.includes(cl.toValue ?? ''),
+      );
+      const resolvedAt = doneTransition
+        ? doneTransition.changedAt.toISOString()
+        : null;
+
+      let leadTimeDays: number | null = null;
+      if (doneTransition) {
+        const rawDays =
+          (doneTransition.changedAt.getTime() - startTime.getTime()) /
+          86_400_000;
+        // Clamp negative values (data anomalies) to null
+        leadTimeDays =
+          rawDays >= 0
+            ? Math.round(rawDays * 100) / 100
+            : null;
+      }
+
+      // jiraUrl
+      const jiraUrl = this.jiraBaseUrl
+        ? `${this.jiraBaseUrl}/browse/${issue.key}`
+        : '';
+
+      issues.push({
+        key: issue.key,
+        summary: issue.summary,
+        currentStatus: issue.status,
+        issueType: issue.issueType,
+        addedMidSprint,
+        roadmapLinked,
+        isIncident,
+        isFailure,
+        completedInSprint,
+        leadTimeDays,
+        resolvedAt,
+        jiraUrl,
+      });
+    }
+
+    // Sort: incomplete issues first (alphabetical by key), then completed
+    issues.sort((a, b) => {
+      if (a.completedInSprint !== b.completedInSprint) {
+        return a.completedInSprint ? 1 : -1;
+      }
+      return a.key.localeCompare(b.key);
+    });
+
+    // -----------------------------------------------------------------------
+    // Summary computation
+    // -----------------------------------------------------------------------
+    const leadTimeSamples = issues
+      .filter((i) => i.leadTimeDays !== null)
+      .map((i) => i.leadTimeDays as number)
+      .sort((a, b) => a - b);
+
+    const medianLeadTimeDays =
+      leadTimeSamples.length > 0
+        ? // TODO: extract to shared utility (see proposal §7.5)
+          median(leadTimeSamples)
+        : null;
+
+    const summary: SprintDetailSummary = {
+      // committedCount: issues present at sprint start that have not been removed
+      // (excludes issues removed from the sprint mid-flight)
+      committedCount: issues.filter((i) => !i.addedMidSprint).length,
+      addedMidSprintCount: issues.filter((i) => i.addedMidSprint).length,
+      removedCount: removedKeys.size,
+      completedInSprintCount: issues.filter((i) => i.completedInSprint).length,
+      roadmapLinkedCount: issues.filter((i) => i.roadmapLinked).length,
+      incidentCount: issues.filter((i) => i.isIncident).length,
+      failureCount: issues.filter((i) => i.isFailure).length,
+      medianLeadTimeDays,
+    };
+
+    return {
+      sprintId: sprint.id,
+      sprintName: sprint.name,
+      state: sprint.state,
+      startDate: sprint.startDate ? sprint.startDate.toISOString() : null,
+      endDate: sprint.endDate ? sprint.endDate.toISOString() : null,
+      boardConfig: boardConfigShape,
+      summary,
+      issues,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Private helpers
+  // -------------------------------------------------------------------------
+
+  private buildEmptyResponse(
+    sprint: JiraSprint,
+    boardConfig: SprintDetailBoardConfig,
+  ): SprintDetailResponse {
+    return {
+      sprintId: sprint.id,
+      sprintName: sprint.name,
+      state: sprint.state,
+      startDate: sprint.startDate ? sprint.startDate.toISOString() : null,
+      endDate: sprint.endDate ? sprint.endDate.toISOString() : null,
+      boardConfig,
+      summary: {
+        committedCount: 0,
+        addedMidSprintCount: 0,
+        removedCount: 0,
+        completedInSprintCount: 0,
+        roadmapLinkedCount: 0,
+        incidentCount: 0,
+        failureCount: 0,
+        medianLeadTimeDays: null,
+      },
+      issues: [],
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pure helpers (module-level, not exported)
+// ---------------------------------------------------------------------------
+
+/**
+ * Exact sprint-name match inside a comma-separated Sprint field value.
+ * Prevents "Sprint 1" from matching "Sprint 10".
+ */
+function sprintValueContains(
+  value: string | null,
+  sprintName: string,
+): boolean {
+  if (!value) return false;
+  return value.split(',').some((s) => s.trim() === sprintName);
+}
+
+/**
+ * Check if an issue was in the sprint at the given date by replaying
+ * Sprint-field changelogs. Applies a 5-minute grace period to absorb
+ * Jira's bulk-add delay.
+ *
+ * Returns true when sprintChangelogs.length === 0 (issue created directly
+ * in the sprint with no changelog — see proposal §6c).
+ */
+function wasInSprintAtDate(
+  sprintChangelogs: JiraChangelog[],
+  sprintName: string,
+  date: Date,
+): boolean {
+  const effectiveDate = new Date(date.getTime() + SPRINT_GRACE_PERIOD_MS);
+  let inSprint = false;
+
+  for (const cl of sprintChangelogs) {
+    if (cl.changedAt > effectiveDate) break;
+
+    if (sprintValueContains(cl.toValue, sprintName)) {
+      inSprint = true;
+    }
+    if (
+      sprintValueContains(cl.fromValue, sprintName) &&
+      !sprintValueContains(cl.toValue, sprintName)
+    ) {
+      inSprint = false;
+    }
+  }
+
+  // No changelog = issue was assigned at creation
+  if (sprintChangelogs.length === 0) {
+    return true;
+  }
+
+  return inSprint;
+}
+
+/**
+ * Compute the median of a sorted array of numbers.
+ * Returns null for an empty array.
+ * TODO: extract to shared utility (see proposal §7.5)
+ */
+function median(sorted: number[]): number | null {
+  if (sorted.length === 0) return null;
+  const index = 0.5 * (sorted.length - 1);
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (index - lower) * (sorted[upper] - sorted[lower]);
+}

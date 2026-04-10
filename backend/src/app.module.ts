@@ -11,6 +11,7 @@ import { BoardsModule } from './boards/boards.module.js';
 import { MetricsModule } from './metrics/metrics.module.js';
 import { PlanningModule } from './planning/planning.module.js';
 import { RoadmapModule } from './roadmap/roadmap.module.js';
+import { SprintModule } from './sprint/sprint.module.js';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { RoadmapModule } from './roadmap/roadmap.module.js';
     MetricsModule,
     PlanningModule,
     RoadmapModule,
+    SprintModule,
     HealthModule,
   ],
 })

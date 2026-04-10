@@ -1,9 +1,51 @@
 # 0002 — Sprint Detail View
 
 **Date:** 2026-04-10
-**Status:** Draft
+**Status:** Accepted
 **Author:** Architect Agent
-**Related ADRs:** None yet — ADRs will be created when this proposal is accepted.
+**Related ADRs:** [ADR-0014](../decisions/0014-sprint-detail-view.md)
+
+---
+
+> **Amendment notes (Architect review 2026-04-10):**
+> The following corrections were made after verifying the proposal against the codebase:
+>
+> 1. **`RoadmapConfig` scoping** (§2, §4a, §4e): `SprintDetailService` must load
+>    `coveredEpicKeys` via `RoadmapConfig`-scoped query — identical to
+>    `RoadmapService.loadCoveredEpicKeys()` — not by loading all `JpdIdea` rows.
+>    `RoadmapConfig` added to entity imports in `SprintModule` (§4e).
+>
+> 2. **`wasInSprintAtDate()` — no-changelog issues** (§4b, §6c): The `PlanningService`
+>    handles no-changelog issues by also including issues where `issue.sprintId ===
+>    sprint.id` (current assignment) as a fallback. The `SprintDetailService` must
+>    replicate this pattern. Section §4b amended to document this explicitly.
+>
+> 3. **`completedInSprint` — `>= startDate` constraint** (§4c): The proposal's logic
+>    adds a `>= sprint.startDate` guard on status changelogs to avoid crediting
+>    completions from a previous sprint. `PlanningService` does not apply this guard,
+>    so this is a deliberate refinement (more correct for the detail view context).
+>    Documented as an intentional deviation.
+>
+> 4. **`SprintDetailBoardConfig` named interface** (§3c, §8.3): The inline `boardConfig`
+>    object in `SprintDetailResponse` is promoted to a named `SprintDetailBoardConfig`
+>    interface in §3c, consistent with the constraint in §8.3.
+>
+> 5. **`ConfigService` injection** (§4e): `ConfigModule` is global in `AppModule` so no
+>    module-level import is needed, but the `SprintDetailService` constructor must
+>    inject `ConfigService`. Documented in §4e.
+>
+> 6. **No index on `jira_changelogs`**: Confirmed — the initial migration
+>    (`1775795358704-InitialSchema.ts`) creates no indexes on `jira_changelogs`.
+>    The `(issueKey, field)` index is missing. §8.1 already flags this correctly;
+>    the acceptance criteria now explicitly require the migration.
+>
+> 7. **`apps/api` vs `backend/`** (§3a, §5a): The project uses `backend/` and
+>    `frontend/` directories (ADR-0007), not `apps/api`/`apps/web`. All paths
+>    confirmed correct in the proposal — no changes needed.
+>
+> 8. **`SprintAccuracy.sprintId` availability** (§1a, §1b): Confirmed present on both
+>    `SprintAccuracy` (planning) and `RoadmapSprintAccuracy` (roadmap) interfaces.
+>    `row.sprintId` is safe to use in `render` callbacks.
 
 ---
 
@@ -33,18 +75,19 @@ computed and displayed inline.
 [Roadmap table row click]   ─────────────────────────────────┤
 [DORA sprint selector]      ─────────────────────────────────┘
                                          │
-                        /sprint/[boardId]/[sprintId]  (Next.js page)
+                         /sprint/[boardId]/[sprintId]  (Next.js page)
                                          │
-                        GET /api/sprints/:boardId/:sprintId/detail
+                         GET /api/sprints/:boardId/:sprintId/detail
                                          │
-                                SprintDetailService
+                                 SprintDetailService
                                          │
-                ┌────────────────────────┴──────────────────────────┐
-                │                                                    │
-        jira_sprints (1 row)                             BoardConfig (1 row)
-        jira_issues  (N rows, sprintId match + changelog replay)
-        jira_changelogs (sprint-field + status-field, bulk)
-        jpd_ideas   (all, for coveredEpicKeys set)
+                 ┌────────────────────────┴──────────────────────────┐
+                 │                                                    │
+         jira_sprints (1 row)                             BoardConfig (1 row)
+         jira_issues  (N rows, sprintId match + changelog replay)
+         jira_changelogs (sprint-field + status-field, bulk)
+         roadmap_configs (all, to scope jpd keys)
+         jpd_ideas   (scoped by roadmap_configs.jpdKey, for coveredEpicKeys set)
 ```
 
 A new `SprintModule` owns a `SprintDetailService` and a `SprintController`. It depends
@@ -53,7 +96,8 @@ coordinated query sequence per request, returning a fully annotated per-issue re
 The frontend page is a new Next.js dynamic route at
 `frontend/src/app/sprint/[boardId]/[sprintId]/page.tsx`.
 
-No new npm packages are required. No new database migrations are required.
+No new npm packages are required. No new database migrations are required beyond the
+`jira_changelogs(issueKey, field)` index addition (see §8.1).
 
 ---
 
@@ -85,7 +129,9 @@ wraps the name in a `<Link>` (Next.js `Link` from `next/link`):
 ```
 
 The `selectedBoard` local state is already available in scope. `row.sprintId` is
-available because `SprintAccuracy` already carries it.
+available because `SprintAccuracy` already carries it (confirmed: `sprintId: string`
+is field 1 of the `SprintAccuracy` interface in `backend/src/planning/planning.service.ts`
+and mirrored in `frontend/src/lib/api.ts`).
 
 #### 1b. Roadmap page (`/roadmap`)
 
@@ -106,6 +152,12 @@ The same pattern in the sprint-mode `DataTable` in `roadmap/page.tsx`:
   ),
 },
 ```
+
+`RoadmapSprintAccuracy` also carries `sprintId: string` (confirmed in
+`frontend/src/lib/api.ts`). The Kanban board path through `roadmap/page.tsx` returns
+quarter-keyed rows (where `sprintId` is a string like `"2026-Q1"`) — the link
+should only be rendered when `periodType === 'sprint'`, so the Kanban case is
+naturally excluded because Kanban boards switch to `quarter` mode automatically.
 
 #### 1c. DORA page (`/dora`)
 
@@ -130,7 +182,8 @@ sprint IDs from the Jira Agile API are globally unique integers but the board co
 determines which `BoardConfig` rules apply.
 
 The page does **not** appear in the sidebar navigation (it is a drill-through, not a
-top-level view). The sidebar `NAV_ITEMS` array in `sidebar.tsx` is left unchanged.
+top-level view). The `NAV_ITEMS` array in
+`frontend/src/components/layout/sidebar.tsx` is left unchanged.
 
 #### 1e. Back Navigation
 
@@ -150,8 +203,8 @@ respectively and uses `router.back()` (Next.js `useRouter`). If absent, the link
 
 ### 2. Data Model — What Is Already Available
 
-**No new database migrations are required.** Every annotation can be derived from
-existing tables using already-synced data.
+**No new database migrations are required** beyond the index addition in §8.1.
+Every annotation can be derived from existing tables using already-synced data.
 
 The full data model required by the service is:
 
@@ -160,7 +213,8 @@ The full data model required by the service is:
 | `JiraSprint` | `id`, `name`, `state`, `startDate`, `endDate`, `boardId` | ✅ |
 | `JiraIssue` | `key`, `summary`, `status`, `issueType`, `epicKey`, `labels`, `createdAt`, `sprintId`, `boardId` | ✅ |
 | `JiraChangelog` | `issueKey`, `field`, `fromValue`, `toValue`, `changedAt` | ✅ |
-| `JpdIdea` | `deliveryIssueKeys` (array of epic keys) | ✅ |
+| `RoadmapConfig` | `jpdKey` (to scope which JPD projects are configured) | ✅ |
+| `JpdIdea` | `deliveryIssueKeys` (array), `jpdKey` (to filter by configured projects) | ✅ |
 | `BoardConfig` | `doneStatusNames`, `failureIssueTypes`, `failureLabels`, `failureLinkTypes`, `incidentIssueTypes`, `incidentLabels` | ✅ |
 
 **Critical observation on `JiraIssue.sprintId`:** The `sprintId` column stores the
@@ -169,6 +223,14 @@ an issue that moved between sprints will only show the most-recent value. The sp
 detail view must therefore reconstruct sprint membership from `JiraChangelog`
 (field = `'Sprint'`) — exactly the same approach used by `PlanningService`. This is
 a known limitation that `PlanningService` already handles correctly.
+
+**Critical observation on `coveredEpicKeys` scoping:** `RoadmapService.loadCoveredEpicKeys()`
+loads `JpdIdea` rows scoped to configured `RoadmapConfig.jpdKey` values, not all ideas.
+`SprintDetailService` must use the same scoped approach — loading all `JpdIdea` rows
+without `RoadmapConfig` scoping would include epic keys from JPD projects the team has
+not configured for this dashboard, producing incorrect `roadmapLinked` annotations.
+The `SprintModule` therefore imports both `RoadmapConfig` and `JpdIdea` repositories
+(see §4e).
 
 **Critical observation on link-based CFR (`failureLinkTypes`):** The `JiraIssue` entity
 does not store `issuelinks`. Link-based failure detection (an issue linked *to* another
@@ -215,7 +277,8 @@ backend/src/sprint/
 GET /api/sprints/:boardId/:sprintId/detail
 ```
 
-Protected by `ApiKeyAuthGuard` (same guard used across all other controllers).
+Protected by `ApiKeyAuthGuard` (same guard used across all other controllers; imported
+from `../auth/api-key-auth.guard.js`).
 
 **Request parameters:**
 
@@ -231,16 +294,25 @@ server-side.
 
 | Status | Condition |
 |---|---|
-| `400 Bad Request` | `boardId` refers to a Kanban board (`boardType === 'kanban'`) |
+| `400 Bad Request` | `boardId` refers to a Kanban board (`boardConfig.boardType === 'kanban'`) |
 | `404 Not Found` | No `JiraSprint` row matches `{ id: sprintId, boardId }` |
 
 #### 3c. Response DTO
 
 ```typescript
 // backend/src/sprint/dto/sprint-detail-query.dto.ts
-// (used only for path param validation — NestJS uses @Param() not @Query() here)
+// (path params are validated inline via @Param() in the controller)
 
 // backend/src/sprint/sprint-detail.service.ts — exported interfaces
+
+/** Board configuration rules applied to derive per-issue annotations */
+export interface SprintDetailBoardConfig {
+  doneStatusNames: string[];
+  failureIssueTypes: string[];
+  failureLabels: string[];
+  incidentIssueTypes: string[];
+  incidentLabels: string[];
+}
 
 export interface SprintDetailIssue {
   /** Jira issue key, e.g. "ACC-123" */
@@ -265,7 +337,8 @@ export interface SprintDetailIssue {
 
   /**
    * True if the issue's epicKey is a member of the coveredEpicKeys set
-   * (i.e. issue.epicKey ∈ any JpdIdea.deliveryIssueKeys).
+   * (i.e. issue.epicKey ∈ any JpdIdea.deliveryIssueKeys, scoped to
+   * configured RoadmapConfig.jpdKey values).
    * False if epicKey is null or not covered.
    */
   roadmapLinked: boolean;
@@ -288,6 +361,8 @@ export interface SprintDetailIssue {
    * True if the issue transitioned to a doneStatusName between
    * sprint.startDate and sprint.endDate (inclusive).
    * For active sprints, sprint.endDate is treated as the current time.
+   * Also true if the issue's current status is already in doneStatusNames,
+   * as a fallback for issues with missing or truncated changelogs.
    */
   completedInSprint: boolean;
 
@@ -297,20 +372,21 @@ export interface SprintDetailIssue {
    * Falls back to (firstDoneTransitionDate - issue.createdAt) if no
    * "In Progress" transition exists.
    * Null if no done transition is found in the changelog at all.
+   * Negative values (data anomalies) are clamped to null.
+   * Rounded to 2 decimal places.
    */
   leadTimeDays: number | null;
 
   /**
    * ISO 8601 timestamp of the issue's first done-status transition,
-   * or null if no such transition is found. Used to display "resolved at"
-   * in the UI without requiring a second calculation pass.
+   * or null if no such transition is found.
    */
   resolvedAt: string | null;
 
   /**
    * Deep link to the issue in Jira Cloud.
    * Constructed as: `${JIRA_BASE_URL}/browse/${key}`
-   * Populated from the JIRA_BASE_URL environment variable.
+   * Empty string if JIRA_BASE_URL is not configured (see §7.2).
    */
   jiraUrl: string;
 }
@@ -349,13 +425,7 @@ export interface SprintDetailResponse {
   endDate: string | null;    // ISO 8601
 
   /** The BoardConfig rules applied to derive annotations */
-  boardConfig: {
-    doneStatusNames: string[];
-    failureIssueTypes: string[];
-    failureLabels: string[];
-    incidentIssueTypes: string[];
-    incidentLabels: string[];
-  };
+  boardConfig: SprintDetailBoardConfig;
 
   /** Aggregate summary bar counts */
   summary: SprintDetailSummary;
@@ -402,14 +472,22 @@ The service must avoid N+1 queries. The pattern used by `PlanningService` and
 `RoadmapService` is followed:
 
 1. Load sprint (1 query)
-2. Load all board issues (1 query, `boardId` scoped — required for changelog replay)
-3. Bulk-load Sprint-field changelogs for all board issue keys (1 query)
-4. Identify the final sprint membership set (in-memory replay)
-5. Bulk-load status-field changelogs for sprint member issue keys (1 query)
-6. Load `BoardConfig` (1 query, or from cache — already in pattern)
-7. Load `JpdIdea` rows (1 query) → build `coveredEpicKeys` set (in-memory)
+2. Load `BoardConfig` (1 query) — and check for Kanban before proceeding
+3. Load all board issues (1 query, `boardId` scoped — required for changelog replay)
+4. Bulk-load Sprint-field changelogs for all board issue keys (1 query)
+5. Identify the final sprint membership set (in-memory replay — see §4b)
+6. Bulk-load status-field changelogs for sprint member issue keys (1 query)
+7. Load `RoadmapConfig` rows (1 query) → extract configured `jpdKey` set
+8. Load `JpdIdea` rows scoped to those `jpdKey` values (1 query) → build `coveredEpicKeys` set (in-memory)
 
-Total: 6 database round-trips regardless of sprint size. No unbounded queries.
+Total: 7 database round-trips regardless of sprint size. No unbounded queries.
+
+**Note on step 7–8 vs. all-ideas approach:** Loading all `JpdIdea` rows without
+`RoadmapConfig` scoping is incorrect — it would include ideas from JPD projects the
+team has not configured for this dashboard. The `RoadmapService.loadCoveredEpicKeys()`
+pattern (scoped by `RoadmapConfig.jpdKey`) must be replicated here. If no
+`RoadmapConfig` rows exist, `coveredEpicKeys` is an empty set and all issues will have
+`roadmapLinked = false`.
 
 #### 4b. Sprint Membership Reconstruction
 
@@ -423,54 +501,84 @@ as `PlanningService.calculateSprintAccuracy()`, including:
 The service additionally tracks **per-issue** `addedMidSprint` and `removed` flags so
 they can be included in the response (planning service only exposes aggregate counts).
 
+**Handling no-changelog issues (critical):** `PlanningService` handles issues with no
+Sprint-field changelog in two steps:
+1. The `wasInSprintAtDate()` function returns `true` when `sprintChangelogs.length === 0`,
+   treating creation-time assignment as "was in sprint at start".
+2. Additionally, `PlanningService` explicitly includes issues where `issue.sprintId ===
+   sprint.id` with an empty changelog entry, because some issues may be currently
+   assigned to the sprint but have no changelog (e.g. created directly in the sprint
+   via the Jira UI before changelog recording began).
+
+`SprintDetailService` must replicate step 2: after building the `logsByIssue` map from
+Sprint-field changelogs, include any board issue where `issue.sprintId === sprint.id`
+AND the issue is not already in `logsByIssue` (assign it an empty changelog array).
+
 **Membership reconstruction algorithm** (produces the `finalIssueSet` and per-issue flags):
 
 ```
-For each issue in boardIssues (filtered: issueType ≠ 'Epic' AND issueType ≠ 'Sub-task'):
+// Step 1: Filter board issues — exclude Epics and Sub-tasks
+boardIssues = boardIssues.filter(i => i.issueType !== 'Epic' && i.issueType !== 'Sub-task')
 
-  sprintLogs = Sprint-field changelogs for this issue that reference sprint.name
-  createdAt  = issue.createdAt
+// Step 2: Build logsByIssue map from Sprint-field changelogs
+for each cl in sprintChangelogs where field = 'Sprint':
+  if sprintValueContains(cl.fromValue, sprint.name) || sprintValueContains(cl.toValue, sprint.name):
+    logsByIssue[cl.issueKey].push(cl)
 
-  // Was the issue in the sprint at start? (grace period applied)
-  wasAtStart = wasInSprintAtDate(sprintLogs, sprint.name, sprint.startDate)
+// Step 3: Include current-sprint issues with no changelog (PlanningService pattern)
+for each issue in boardIssues where issue.sprintId === sprint.id:
+  if issue.key not in logsByIssue:
+    logsByIssue[issue.key] = []
 
-  // Was it created directly into the sprint during the grace window?
-  createdMidSprint = (sprintLogs.length === 0)
-                     && (createdAt > sprint.startDate + GRACE_PERIOD)
+// Step 4: Classify each issue
+effectiveSprintStart = sprint.startDate + GRACE_PERIOD
+sprintEnd = sprint.endDate ?? new Date()
 
-  inSprintAtEnd     = wasAtStart || createdMidSprint
-  addedMidSprint    = createdMidSprint
+for each [issueKey, logs] in logsByIssue:
+  createdAt = issue.createdAt
+  createdMidSprint = (logs.length === 0) && (createdAt > effectiveSprintStart)
+
+  wasAtStart = !createdMidSprint && wasInSprintAtDate(logs, sprint.name, sprint.startDate)
+
+  inSprintAtEnd = wasAtStart || createdMidSprint
+  wasAddedDuringSprint = createdMidSprint
   removedFromSprint = false
 
-  for cl in sprintLogs where cl.changedAt ∈ (sprint.startDate, sprint.endDate]:
+  for cl in logs where cl.changedAt > sprint.startDate && cl.changedAt <= sprintEnd:
     if sprintValueContains(cl.toValue, sprint.name):
       if !inSprintAtEnd && !wasAtStart:
-        addedMidSprint = true
+        wasAddedDuringSprint = true
       inSprintAtEnd = true
     if sprintValueContains(cl.fromValue, sprint.name) && !sprintValueContains(cl.toValue, sprint.name):
       inSprintAtEnd = false
-      if wasAtStart || addedMidSprint:
-        removedFromSprint = true
 
-  if wasAtStart || addedMidSprint:
-    include issue in finalIssueSet
-    record: addedMidSprint flag, removedFromSprint flag
+  if wasAtStart && !inSprintAtEnd:
+    removedFromSprint = true
+  if wasAddedDuringSprint && !inSprintAtEnd:
+    removedFromSprint = true
 
-// Issues with removedFromSprint = true are EXCLUDED from finalIssueSet
-// (they are counted in the summary but not shown in the issues array)
+  if wasAtStart:
+    committedKeys.add(issueKey)
+  else if wasAddedDuringSprint:
+    addedKeys.add(issueKey)
+
+  if removedFromSprint:
+    removedKeys.add(issueKey)
+
+// Step 5: Build finalIssueSet = (committedKeys ∪ addedKeys) \ removedKeys
 ```
 
 #### 4c. Annotation Derivation Rules
 
-For each issue in `finalIssueSet` (epics and sub-tasks already excluded):
+For each issue in `finalIssueSet` (epics and sub-tasks already excluded in §4b step 1):
 
 **`addedMidSprint`**
 ```
-addedMidSprint = (the issue's first Sprint-field changelog pointing TO this sprint)
-                 .changedAt > (sprint.startDate + 5 minutes)
-              OR (issue.createdAt > sprint.startDate + 5 minutes
-                  AND no Sprint-field changelog exists for this sprint)
+addedMidSprint = issueKey ∈ addedKeys (as determined in §4b classification)
 ```
+This covers both the changelog-based case (first Sprint-field changelog pointing to this
+sprint has `changedAt > sprint.startDate + 5 minutes`) and the direct-creation case
+(`issue.createdAt > sprint.startDate + 5 minutes` with no changelog).
 
 **`roadmapLinked`**
 ```
@@ -478,7 +586,9 @@ roadmapLinked = issue.epicKey !== null
              && coveredEpicKeys.has(issue.epicKey)
 
 where coveredEpicKeys = new Set(
-  allJpdIdeas.flatMap(idea => idea.deliveryIssueKeys ?? []).filter(Boolean)
+  jpdIdeas                              // scoped to configured RoadmapConfig.jpdKey values
+    .flatMap(idea => idea.deliveryIssueKeys ?? [])
+    .filter(Boolean)
 )
 ```
 This is identical to the rule used by `RoadmapService.calculateSprintAccuracy()`.
@@ -489,7 +599,8 @@ isIncident = boardConfig.incidentIssueTypes.includes(issue.issueType)
           || (boardConfig.incidentLabels.length > 0
               && issue.labels.some(l => boardConfig.incidentLabels.includes(l)))
 ```
-Mirrors `MttrService.calculate()` line for line.
+Mirrors `MttrService.calculate()` — the `incidentLabels.length > 0` guard is
+important and must not be omitted.
 
 **`isFailure`**
 ```
@@ -501,24 +612,24 @@ Link-based detection (`failureLinkTypes`) is **not evaluated** — see §2 and �
 
 **`completedInSprint`**
 
-Uses the status-field changelogs bulk-loaded in step 5 of §4a.
+Uses the status-field changelogs bulk-loaded in step 6 of §4a. Note: this is a
+deliberate refinement over `PlanningService` — the `>= sprint.startDate` guard on
+changelog lookup prevents a previous-sprint completion from being credited.
 
 ```
 sprintWindow = [sprint.startDate, sprint.endDate ?? new Date()]
 
 completedInSprint =
-  // Current status is already done (and issue is still in sprint)
+  // Case 1: current status is already done (fallback for missing/truncated changelogs)
   boardConfig.doneStatusNames.includes(issue.status)
   ||
-  // Or: a status changelog transitioned TO a done status within the sprint window
+  // Case 2: a status changelog transitioned TO a done status within the sprint window
   statusChangelogs
     .filter(cl => cl.issueKey === issue.key)
     .some(cl => boardConfig.doneStatusNames.includes(cl.toValue ?? '')
-             && cl.changedAt >= sprint.startDate
+             && cl.changedAt >= sprint.startDate     // ← guard: not from a prior sprint
              && cl.changedAt <= (sprint.endDate ?? new Date()))
 ```
-
-This mirrors `PlanningService.calculateSprintAccuracy()` completed-set logic exactly.
 
 **`leadTimeDays` and `resolvedAt`**
 
@@ -543,16 +654,18 @@ For `leadTimeDays`, values are rounded to 2 decimal places. Negative values (dat
 anomalies where createdAt > resolvedAt) are clamped to `null`.
 
 This is consistent with `LeadTimeService.calculate()` for Scrum boards (falls back
-to `issue.createdAt` when no In Progress transition exists).
+to `issue.createdAt` when no In Progress transition exists). The `resolvedAt` is the
+date of the first done-transition, not the sprint-window-restricted done transition —
+it is purely informational.
 
 **`jiraUrl`**
 
 ```
-jiraUrl = `${process.env.JIRA_BASE_URL}/browse/${issue.key}`
+jiraUrl = `${configService.get('JIRA_BASE_URL', '')}/browse/${issue.key}`
 ```
 
-`JIRA_BASE_URL` is already expected to be present in the environment (used by
-`JiraClientService`). The service reads it via NestJS `ConfigService`.
+`JIRA_BASE_URL` is read via NestJS `ConfigService` (injected in constructor). If absent,
+`jiraUrl` is empty string `''` and the frontend renders the key as plain text.
 
 #### 4d. Summary Computation
 
@@ -560,18 +673,18 @@ After building `issues[]`, compute `summary` in a single pass:
 
 ```typescript
 const summary: SprintDetailSummary = {
-  committedCount:       issues.filter(i => !i.addedMidSprint).length,
-  addedMidSprintCount:  issues.filter(i => i.addedMidSprint).length,
-  removedCount:         removedIssues.length,   // tracked separately during membership replay
+  committedCount:         issues.filter(i => !i.addedMidSprint).length,
+  addedMidSprintCount:    issues.filter(i => i.addedMidSprint).length,
+  removedCount:           removedKeys.size,   // tracked separately during membership replay
   completedInSprintCount: issues.filter(i => i.completedInSprint).length,
-  roadmapLinkedCount:   issues.filter(i => i.roadmapLinked).length,
-  incidentCount:        issues.filter(i => i.isIncident).length,
-  failureCount:         issues.filter(i => i.isFailure).length,
-  medianLeadTimeDays:   median(issues.filter(i => i.leadTimeDays !== null).map(i => i.leadTimeDays!)) ?? null,
+  roadmapLinkedCount:     issues.filter(i => i.roadmapLinked).length,
+  incidentCount:          issues.filter(i => i.isIncident).length,
+  failureCount:           issues.filter(i => i.isFailure).length,
+  medianLeadTimeDays:     median(issues.filter(i => i.leadTimeDays !== null).map(i => i.leadTimeDays!)) ?? null,
 };
 ```
 
-`median()` is a local utility (same percentile function already duplicated in
+`median()` is a local utility (same `percentile()` function already duplicated in
 `MttrService` and `LeadTimeService` — see §7.5 for deduplication note).
 
 #### 4e. Module Definition
@@ -587,6 +700,7 @@ const summary: SprintDetailSummary = {
       JiraChangelog,
       BoardConfig,
       JpdIdea,
+      RoadmapConfig,   // required for scoped coveredEpicKeys loading
     ]),
   ],
   controllers: [SprintController],
@@ -595,8 +709,21 @@ const summary: SprintDetailSummary = {
 export class SprintModule {}
 ```
 
-`SprintModule` is added to the `imports` array of `AppModule`. No existing modules are
-modified except `AppModule`.
+`SprintModule` is added to the `imports` array of `AppModule`
+(`backend/src/app.module.ts`). No other existing modules are modified.
+
+**`ConfigService` injection:** `ConfigModule` is already global in `AppModule`
+(`ConfigModule.forRoot({ isGlobal: true })`), so no module-level `ConfigModule`
+import is needed in `SprintModule`. `SprintDetailService` injects `ConfigService`
+directly in its constructor:
+
+```typescript
+constructor(
+  @InjectRepository(JiraSprint) private readonly sprintRepo: ...,
+  // ... other repos ...
+  private readonly configService: ConfigService,
+) {}
+```
 
 ---
 
@@ -608,13 +735,23 @@ modified except `AppModule`.
 frontend/src/app/sprint/[boardId]/[sprintId]/page.tsx
 ```
 
-This is a Next.js 16 dynamic route. It is a `'use client'` component (no RSC data
-fetching needed — consistent with all other pages in this project).
+This is a Next.js dynamic route. It is a `'use client'` component (no RSC data
+fetching needed — consistent with all other pages in this project which are all
+`'use client'`).
 
 #### 5b. API Client Additions (`frontend/src/lib/api.ts`)
 
 ```typescript
 // New types added to api.ts
+
+/** Board configuration rules applied to derive per-issue annotations */
+export interface SprintDetailBoardConfig {
+  doneStatusNames: string[];
+  failureIssueTypes: string[];
+  failureLabels: string[];
+  incidentIssueTypes: string[];
+  incidentLabels: string[];
+}
 
 export interface SprintDetailIssue {
   key: string;
@@ -648,13 +785,7 @@ export interface SprintDetailResponse {
   state: string;
   startDate: string | null;
   endDate: string | null;
-  boardConfig: {
-    doneStatusNames: string[];
-    failureIssueTypes: string[];
-    failureLabels: string[];
-    incidentIssueTypes: string[];
-    incidentLabels: string[];
-  };
+  boardConfig: SprintDetailBoardConfig;
   summary: SprintDetailSummary;
   issues: SprintDetailIssue[];
 }
@@ -688,7 +819,9 @@ The page is divided into three vertical sections:
 
 The header uses the same `text-2xl font-bold` style as existing pages. The summary bar
 uses a flex-wrap row of small `<div>` stat chips consistent with the metric cards in
-`dora/page.tsx`. The issues table reuses `DataTable<SprintDetailIssue>`.
+`dora/page.tsx`. The issues table reuses `DataTable<SprintDetailIssue>` from
+`frontend/src/components/ui/data-table.tsx` (the `Column<T>` generic interface with
+`render?: (value: unknown, row: T) => ReactNode` supports all required badge renders).
 
 #### 5d. Issues Table Columns
 
@@ -698,7 +831,7 @@ table scannable at a glance.
 
 | Column key | Label | Sortable | Render |
 |---|---|---|---|
-| `key` | Issue | ✅ | `<a href={row.jiraUrl} target="_blank">ACC-123 ↗</a>` |
+| `key` | Issue | ✅ | `<a href={row.jiraUrl} target="_blank">ACC-123 ↗</a>` (plain text if `jiraUrl` is empty) |
 | `summary` | Summary | ✅ | Plain text, truncated to 60 chars with `title` tooltip |
 | `issueType` | Type | ✅ | Plain text |
 | `currentStatus` | Status | ✅ | Pill badge (same style as existing state badges) |
@@ -723,14 +856,18 @@ Priority order: incident/failure > scope creep > completed.
   as all other pages).
 - **Error:** Red error banner (same pattern as other pages).
 - **404 / Kanban:** Show `<EmptyState>` with message derived from error type.
+  `EmptyState` is already available at `frontend/src/components/ui/empty-state.tsx`.
 
 #### 5f. No New Dependencies
 
 All UI elements are achievable with:
-- Existing `DataTable` component (reused as-is)
-- Existing `EmptyState` component
+- Existing `DataTable` component (`frontend/src/components/ui/data-table.tsx`) — reused
+  as-is; the existing `Column<T>` interface with `render?: (value, row) => ReactNode`
+  supports all required badge renders
+- Existing `EmptyState` component (`frontend/src/components/ui/empty-state.tsx`)
 - `lucide-react` (already installed) for `Loader2`, `AlertCircle`, `ChevronLeft`,
   `ExternalLink` icons
+- Next.js `Link` from `next/link` (already used across all pages)
 - Tailwind CSS classes already in use across the project
 
 No new npm packages are added.
@@ -746,7 +883,7 @@ This section provides the precise derivation from raw `JiraChangelog` data.
 When Jira moves an issue into or out of a sprint, it records a changelog entry:
 
 ```
-field:     'Sprint'
+field:     'Sprint'           (capital S — confirmed in PlanningService line 138)
 fromValue: 'ACC Sprint 22'          (or null if issue had no sprint before)
 toValue:   'ACC Sprint 22, ACC Sprint 23'  (comma-separated when multi-sprint)
 changedAt: <timestamp>
@@ -767,8 +904,8 @@ function sprintValueContains(value: string | null, sprintName: string): boolean 
 }
 ```
 
-This function is already implemented in `PlanningService` and must be duplicated in
-`SprintDetailService` (or extracted — see §7.5).
+This function is already implemented in `PlanningService` (private method) and must be
+duplicated in `SprintDetailService` (or extracted — see §7.5).
 
 #### 6c. `wasInSprintAtDate()` — Grace Period Logic
 
@@ -791,6 +928,7 @@ function wasInSprintAtDate(
   }
 
   // No Sprint changelog at all = issue was created directly in the sprint
+  // (or no changelog exists — see §4b for the additional currentSprintId check)
   if (sprintChangelogs.length === 0) return true;
   return inSprint;
 }
@@ -835,8 +973,8 @@ follow-on iteration.
 #### 7.2 — Jira deep-link URL
 
 The `jiraUrl` field is constructed from `JIRA_BASE_URL`. If `JIRA_BASE_URL` is not
-configured, the service should omit the field or return an empty string — the frontend
-should render the issue key as plain text instead of a link when `jiraUrl` is empty.
+configured, the service returns `''` for all `jiraUrl` fields. The frontend renders the
+issue key as plain text (not a link) when `jiraUrl` is empty.
 
 **Recommendation:** Validate `JIRA_BASE_URL` presence in `SprintDetailService`
 constructor; log a warning if absent; return `''` for all `jiraUrl` fields.
@@ -864,11 +1002,11 @@ but the frontend should add a warning banner). Pagination is explicitly deferred
 
 #### 7.5 — `percentile()` / `median()` utility duplication
 
-The `percentile()` function is currently duplicated in `MttrService`, `LeadTimeService`,
-and will be needed again in `SprintDetailService`. This is a candidate for extraction
-into a shared utility module at `backend/src/utils/statistics.ts`. Extraction is
-recommended but is a separate refactoring concern and is not a prerequisite for this
-feature.
+The `percentile()` function is currently duplicated in `MttrService` and
+`LeadTimeService` (both at the module level, not exported). It will be needed again in
+`SprintDetailService`. This is a candidate for extraction into a shared utility module
+at `backend/src/utils/statistics.ts`. Extraction is recommended but is a separate
+refactoring concern and is not a prerequisite for this feature.
 
 **Recommendation:** Duplicate for now with a `// TODO: extract to shared utility`
 comment; create a follow-on task.
@@ -877,7 +1015,8 @@ comment; create a follow-on task.
 
 The view is read-only. A sync button (calling `POST /api/sync`) could be placed in the
 header, but this is equivalent to the global sync in the layout and is not specific to
-the sprint view. The existing sync mechanism in `sync-store.ts` handles this globally.
+the sprint view. The existing sync mechanism in
+`frontend/src/store/sync-store.ts` handles this globally.
 
 **Recommendation:** No per-sprint sync button. The global sync in the header is
 sufficient.
@@ -886,21 +1025,32 @@ sufficient.
 
 ### 8. Risks and Constraints
 
-#### 8.1 — Query Performance
+#### 8.1 — Query Performance and Missing Index
 
 The most expensive query is the bulk load of Sprint-field changelogs across all board
 issues. For a board with 2,000 synced issues and 50,000 changelog rows, this query
 selects by `issueKey IN (...)` with up to 2,000 keys.
 
-Mitigation:
-- The `jira_changelogs` table should have an index on `(issueKey, field)`. If this
-  index does not exist, it must be created. **Check the initial migration
-  `1775795358704-InitialSchema.ts`** to confirm — if missing, add it as an additive
-  migration as part of this feature's implementation.
-- The Sprint-field changelog query is scoped to `field = 'Sprint'`, reducing the result
-  set significantly.
-- The status-field changelog query is scoped to the final sprint membership set only
-  (not all board issues), further reducing load.
+**Confirmed gap:** The initial migration (`1775795358704-InitialSchema.ts`) creates
+**no indexes** on `jira_changelogs`. The table has only a primary key. An index on
+`(issueKey, field)` is missing and must be added as part of this feature's
+implementation.
+
+The new migration must be:
+```sql
+-- Up
+CREATE INDEX "IDX_jira_changelogs_issueKey_field"
+  ON "jira_changelogs" ("issueKey", "field");
+
+-- Down
+DROP INDEX "IDX_jira_changelogs_issueKey_field";
+```
+
+This index benefits all existing services (`PlanningService`, `MttrService`,
+`LeadTimeService`, `RoadmapService`) as well as the new `SprintDetailService`. The
+migration file should follow the existing naming convention:
+`backend/src/migrations/1775795358706-AddChangelogIndex.ts` (next available timestamp
+prefix should be generated at implementation time).
 
 #### 8.2 — `sprintId` Column Staleness
 
@@ -908,7 +1058,7 @@ Mitigation:
 the requested sprint but have since moved to a later sprint will have a different
 `sprintId` at query time. The service cannot rely on `WHERE sprintId = :id` alone — it
 must load all board issues and replay changelogs, as `PlanningService` does. This is
-correctly handled in §4a.
+correctly handled in §4a and §4b.
 
 A consequence: for boards with many historical issues, loading all board issues is
 mandatory. On a board with 2,000 issues this is a single efficient query (~100KB of
@@ -917,23 +1067,24 @@ data), but it must be monitored.
 #### 8.3 — No `any` Types
 
 TypeScript `any` is prohibited throughout. All DTO interfaces must be fully typed.
-The `boardConfig` sub-object in `SprintDetailResponse` should be a named interface
-(`SprintDetailBoardConfig`) to prevent implicit `any` in the frontend.
+The `boardConfig` sub-object in `SprintDetailResponse` uses the named
+`SprintDetailBoardConfig` interface (defined in §3c) to prevent implicit `any` in
+frontend consumers.
 
 #### 8.4 — ESM Import Convention
 
 All backend imports use the `.js` extension suffix (e.g. `import { JiraSprint } from
 '../database/entities/index.js'`). All new files in `backend/src/sprint/` must follow
-this convention exactly.
+this convention exactly. Verify against existing controllers and services for the exact
+pattern.
 
 #### 8.5 — `DataTable` Row Key
 
-The existing `DataTable` component uses array index as the row key (`key={idx}`). For
-the sprint detail view, `issue.key` (the Jira issue key) is stable and unique —
-the `DataTable` component should be updated to accept an optional `rowKey` prop, or the
-caller can use the array-index fallback. Since changing `DataTable` would affect all
-consumers, the array-index behaviour is acceptable here and the `DataTable` component
-is left unchanged.
+The existing `DataTable` component (`frontend/src/components/ui/data-table.tsx`)
+uses array index as the row key (`key={idx}` at line 113). For the sprint detail view,
+`issue.key` (the Jira issue key) is stable and unique — however, changing `DataTable`
+to accept an optional `rowKey` prop would affect all consumers. The array-index
+fallback is acceptable here and the `DataTable` component is left unchanged.
 
 ---
 
@@ -980,17 +1131,20 @@ rather than a single typed endpoint.
 
 | Area | Impact | Notes |
 |---|---|---|
-| Database | None / Index check only | No schema changes. Verify `jira_changelogs(issueKey, field)` index; add if missing as an additive migration. |
+| Database | Index migration required | No schema changes. Add `(issueKey, field)` index on `jira_changelogs` — benefits all existing services. Migration file: `backend/src/migrations/<timestamp>-AddChangelogIndex.ts`. |
 | API contract | Additive | New endpoint `GET /api/sprints/:boardId/:sprintId/detail`. No existing endpoints changed. |
-| Frontend | New page + navigation links in two tables | New `sprint/[boardId]/[sprintId]/page.tsx`. `sprintName` column in `planning/page.tsx` and `roadmap/page.tsx` gains a `<Link>` wrapper. `api.ts` gains new types and `getSprintDetail()`. |
-| Tests | New unit tests for `SprintDetailService` | Require mocked repositories. Cover: membership replay (committed, added, removed), all annotation rules, empty sprint, Kanban rejection, missing boardConfig defaults. |
+| Frontend | New page + navigation links in two tables | New `frontend/src/app/sprint/[boardId]/[sprintId]/page.tsx`. `sprintName` column in `frontend/src/app/planning/page.tsx` and `frontend/src/app/roadmap/page.tsx` gains a `<Link>` wrapper. `frontend/src/lib/api.ts` gains new types and `getSprintDetail()`. |
+| Tests | New unit tests for `SprintDetailService` | Require mocked repositories. Cover: membership replay (committed, added, removed), all annotation rules, empty sprint, Kanban rejection, missing boardConfig defaults, no RoadmapConfig rows. |
 | Jira API | No new calls | All data is read from Postgres. No new Jira API endpoints. No rate-limit impact. |
-| `AppModule` | Additive | `SprintModule` added to imports. |
+| `AppModule` | Additive | `SprintModule` added to `imports` in `backend/src/app.module.ts`. |
 
 ---
 
 ## Acceptance Criteria
 
+- [ ] A new migration adds a `CREATE INDEX "IDX_jira_changelogs_issueKey_field" ON
+      "jira_changelogs" ("issueKey", "field")` with a matching `DROP INDEX` in the
+      `down()` method.
 - [ ] `GET /api/sprints/PLAT/:sprintId/detail` returns `400 Bad Request` with a clear
       message for Kanban boards.
 - [ ] `GET /api/sprints/ACC/nonexistent/detail` returns `404 Not Found`.
@@ -1002,42 +1156,53 @@ rather than a single typed endpoint.
 - [ ] An issue whose first Sprint-field changelog pointing to this sprint has
       `changedAt > sprint.startDate + 5 minutes` has `addedMidSprint = true`.
 - [ ] An issue created within 5 minutes of `sprint.startDate` has `addedMidSprint = false`.
-- [ ] `roadmapLinked = true` iff `issue.epicKey ∈ coveredEpicKeys` (loaded from
-      `JpdIdea.deliveryIssueKeys`).
+- [ ] An issue with `issue.sprintId === sprint.id` and no Sprint-field changelog is
+      included in the `issues[]` array (current-sprint assignment fallback).
+- [ ] `roadmapLinked = true` iff `issue.epicKey ∈ coveredEpicKeys`, where
+      `coveredEpicKeys` is built from `JpdIdea.deliveryIssueKeys` **scoped to
+      configured `RoadmapConfig.jpdKey` values** only.
 - [ ] `roadmapLinked = false` when `issue.epicKey` is null.
+- [ ] `roadmapLinked = false` for all issues when no `RoadmapConfig` rows exist.
 - [ ] `isIncident = true` iff `issue.issueType ∈ boardConfig.incidentIssueTypes`
-      OR `issue.labels` intersects `boardConfig.incidentLabels`.
+      OR (`boardConfig.incidentLabels.length > 0` AND `issue.labels` intersects
+      `boardConfig.incidentLabels`).
 - [ ] `isFailure = true` iff `issue.issueType ∈ boardConfig.failureIssueTypes`
       OR `issue.labels` intersects `boardConfig.failureLabels`.
 - [ ] `completedInSprint = true` for an issue that transitioned to a `doneStatusName`
       within `[sprint.startDate, sprint.endDate]`.
 - [ ] `completedInSprint = true` for an issue whose current status is in
-      `doneStatusNames` (even without a matching changelog — covers the case where
-      the changelog was truncated or missing).
+      `doneStatusNames` (fallback for missing/truncated changelogs).
 - [ ] `completedInSprint = false` for an issue that reached a done status only after
       `sprint.endDate`.
+- [ ] `completedInSprint = false` for an issue that reached a done status before
+      `sprint.startDate` (prior-sprint completion not credited).
 - [ ] `leadTimeDays` is `null` for an issue with no done-status transition in the
       changelog.
 - [ ] `leadTimeDays` is computed from `firstInProgressTransition → firstDoneTransition`
       when an In Progress transition exists.
 - [ ] `leadTimeDays` falls back to `createdAt → firstDoneTransition` when no In Progress
       transition exists (Scrum fallback, not null).
+- [ ] Negative `leadTimeDays` values (data anomalies) are clamped to `null`.
 - [ ] `summary.committedCount + summary.addedMidSprintCount` equals `issues.length`
       (every issue in the array is either committed or added).
 - [ ] `summary.removedCount` correctly counts issues removed during the sprint window
       (these are NOT in `issues[]`).
 - [ ] `summary.medianLeadTimeDays` is null when no issues have a computed `leadTimeDays`.
 - [ ] `jiraUrl` for each issue equals `${JIRA_BASE_URL}/browse/${issue.key}`.
+- [ ] `jiraUrl` is `''` (empty string) when `JIRA_BASE_URL` is not configured.
 - [ ] `GET /api/sprints/ACC/:sprintId/detail` completes in under 500ms for a sprint with
       40 issues on a board with 500 total issues (performance regression guard).
 - [ ] The frontend page `/sprint/ACC/:sprintId` renders the summary bar and issues table.
 - [ ] Clicking a sprint name in the Planning page sprint table navigates to
       `/sprint/[boardId]/[sprintId]`.
-- [ ] Clicking a sprint name in the Roadmap page sprint table navigates to
+- [ ] Clicking a sprint name in the Roadmap page sprint-mode table navigates to
       `/sprint/[boardId]/[sprintId]`.
+- [ ] No sprint navigation links are rendered in roadmap quarter-mode (Kanban path).
 - [ ] The back-link navigates correctly based on the `?from=` query parameter.
 - [ ] The issues table is sortable by all columns with sortable=true.
 - [ ] The `jiraUrl` opens in a new tab (`target="_blank"`).
 - [ ] No TypeScript `any` types are introduced in new files.
 - [ ] All new backend files use `.js` ESM import suffixes.
 - [ ] No new npm packages are added to `frontend/package.json`.
+- [ ] `SprintModule` imports `RoadmapConfig` in `TypeOrmModule.forFeature([...])`.
+- [ ] `SprintDetailService` injects `ConfigService` for `JIRA_BASE_URL`.

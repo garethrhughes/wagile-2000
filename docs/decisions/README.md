@@ -25,3 +25,4 @@ a new ADR is created for the replacement decision.
 | [0011](0011-delivery-link-filtering-scoped-to-epic-issue-type.md) | Delivery link filtering scoped to Epic issue type only | Accepted | 2026-04-10 |
 | [0012](0012-roadmap-accuracy-query-correctness-scoped-ideas-and-n-plus-one-fix.md) | Roadmap accuracy query correctness: scoped idea loading and N+1 elimination | Accepted | 2026-04-10 |
 | [0013](0013-board-id-required-on-accuracy-endpoint.md) | `boardId` made required on the roadmap accuracy endpoint | Accepted | 2026-04-10 |
+| [0014](0014-sprint-detail-view.md) | Sprint Detail View: new SprintModule with per-issue annotation endpoint | Accepted | 2026-04-10 |

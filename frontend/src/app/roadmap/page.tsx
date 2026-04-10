@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Loader2 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -313,7 +314,19 @@ export default function RoadmapPage() {
   // Sprint-mode table columns
   const sprintColumns = useMemo<Column<RoadmapSprintAccuracy>[]>(
     () => [
-      { key: 'sprintName', label: 'Sprint', sortable: true },
+      {
+        key: 'sprintName',
+        label: 'Sprint',
+        sortable: true,
+        render: (value, row) => (
+          <Link
+            href={`/sprint/${encodeURIComponent(selectedBoard)}/${encodeURIComponent(row.sprintId)}?from=roadmap`}
+            className="font-medium text-blue-600 hover:underline"
+          >
+            {String(value)}
+          </Link>
+        ),
+      },
       {
         key: 'state',
         label: 'State',
@@ -360,7 +373,7 @@ export default function RoadmapPage() {
         render: (value) => `${Number(value).toFixed(1)}%`,
       },
     ],
-    [],
+    [selectedBoard],
   );
 
   // Quarter-mode table columns

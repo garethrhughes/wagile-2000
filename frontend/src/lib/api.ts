@@ -346,3 +346,60 @@ export function deleteRoadmapConfig(id: number): Promise<void> {
 export function triggerRoadmapSync(): Promise<{ message: string }> {
   return apiFetch('/api/roadmap/sync', { method: 'POST' });
 }
+
+// ---- Sprint Detail types and endpoint ------------------------------------
+
+/** Board configuration rules applied to derive per-issue annotations */
+export interface SprintDetailBoardConfig {
+  doneStatusNames: string[]
+  failureIssueTypes: string[]
+  failureLabels: string[]
+  incidentIssueTypes: string[]
+  incidentLabels: string[]
+}
+
+export interface SprintDetailIssue {
+  key: string
+  summary: string
+  currentStatus: string
+  issueType: string
+  addedMidSprint: boolean
+  roadmapLinked: boolean
+  isIncident: boolean
+  isFailure: boolean
+  completedInSprint: boolean
+  leadTimeDays: number | null
+  resolvedAt: string | null
+  jiraUrl: string
+}
+
+export interface SprintDetailSummary {
+  committedCount: number
+  addedMidSprintCount: number
+  removedCount: number
+  completedInSprintCount: number
+  roadmapLinkedCount: number
+  incidentCount: number
+  failureCount: number
+  medianLeadTimeDays: number | null
+}
+
+export interface SprintDetailResponse {
+  sprintId: string
+  sprintName: string
+  state: string
+  startDate: string | null
+  endDate: string | null
+  boardConfig: SprintDetailBoardConfig
+  summary: SprintDetailSummary
+  issues: SprintDetailIssue[]
+}
+
+export function getSprintDetail(
+  boardId: string,
+  sprintId: string,
+): Promise<SprintDetailResponse> {
+  return apiFetch(
+    `/api/sprints/${encodeURIComponent(boardId)}/${encodeURIComponent(sprintId)}/detail`,
+  )
+}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Loader2, AlertCircle } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -15,6 +16,7 @@ import type { ValueType, NameType } from 'recharts/types/component/DefaultToolti
 import {
   getPlanningAccuracy,
   type SprintAccuracy,
+  ApiError,
 } from '@/lib/api';
 import { ALL_BOARDS } from '@/store/filter-store';
 import { BoardChip } from '@/components/ui/board-chip';
@@ -244,15 +246,14 @@ export default function PlanningPage() {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          const apiErr = err as { status?: number; message?: string };
-          if (apiErr.status === 400) {
-            setKanbanError(true);
+          if (err instanceof ApiError && err.status === 400) {
+            setKanbanError(true)
           } else {
             setError(
               err instanceof Error ? err.message : 'Failed to load planning data',
-            );
+            )
           }
-          setRawData([]);
+          setRawData([])
         }
       })
       .finally(() => {
@@ -322,7 +323,19 @@ export default function PlanningPage() {
   // Sprint-mode table columns
   const sprintColumns = useMemo<Column<SprintAccuracy>[]>(
     () => [
-      { key: 'sprintName', label: 'Sprint', sortable: true },
+      {
+        key: 'sprintName',
+        label: 'Sprint',
+        sortable: true,
+        render: (value, row) => (
+          <Link
+            href={`/sprint/${encodeURIComponent(selectedBoard)}/${encodeURIComponent(row.sprintId)}?from=planning`}
+            className="font-medium text-blue-600 hover:underline"
+          >
+            {String(value)}
+          </Link>
+        ),
+      },
       {
         key: 'state',
         label: 'State',
@@ -370,7 +383,7 @@ export default function PlanningPage() {
         render: (value) => `${Number(value).toFixed(1)}%`,
       },
     ],
-    [],
+    [selectedBoard],
   );
 
   // Quarter-mode table columns
