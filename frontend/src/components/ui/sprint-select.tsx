@@ -22,7 +22,7 @@ export function SprintSelect({ boardId, value, onChange }: SprintSelectProps) {
     setLoading(true);
     getSprints(boardId)
       .then((res) => {
-        if (!cancelled) setSprints(res.sprints);
+        if (!cancelled) setSprints(res ?? []);
       })
       .catch(() => {
         if (!cancelled) setSprints([]);

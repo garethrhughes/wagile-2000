@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import { getDoraMetrics, type MetricResult } from '@/lib/api';
+import { getDoraMetrics, type MetricResult, type DoraBand } from '@/lib/api';
 import { useFilterStore, ALL_BOARDS } from '@/store/filter-store';
 import { MetricCard } from '@/components/ui/metric-card';
 import { BoardChip } from '@/components/ui/board-chip';
@@ -25,25 +25,65 @@ interface AggregatedMetrics {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Map raw backend DORA response to MetricResult for each board
+interface BoardMetrics {
+  boardId: string;
+  deploymentFrequency: MetricResult;
+  leadTime: MetricResult;
+  cfr: MetricResult;
+  mttr: MetricResult;
+}
+
+function mapBoardMetrics(board: {
+  boardId: string;
+  deploymentFrequency: { deploymentsPerDay: number; band: DoraBand };
+  leadTime: { medianDays: number; p95Days: number; band: DoraBand };
+  changeFailureRate: { changeFailureRate: number; band: DoraBand };
+  mttr: { medianHours: number; band: DoraBand };
+}): BoardMetrics {
+  return {
+    boardId: board.boardId,
+    deploymentFrequency: {
+      value: board.deploymentFrequency.deploymentsPerDay,
+      unit: 'deploys/day',
+      band: board.deploymentFrequency.band,
+    },
+    leadTime: {
+      value: board.leadTime.medianDays,
+      unit: 'days',
+      band: board.leadTime.band,
+    },
+    cfr: {
+      value: board.changeFailureRate.changeFailureRate,
+      unit: '%',
+      band: board.changeFailureRate.band,
+    },
+    mttr: {
+      value: board.mttr.medianHours,
+      unit: 'hours',
+      band: board.mttr.band,
+    },
+  };
+}
+
 function aggregateMetrics(
-  boards: {
-    boardId: string;
-    metrics: {
-      deploymentFrequency: MetricResult;
-      leadTime: MetricResult;
-      cfr: MetricResult;
-      mttr: MetricResult;
-    };
-  }[],
+  boards: BoardMetrics[],
 ): AggregatedMetrics | null {
   if (boards.length === 0) return null;
 
-  if (boards.length === 1) return boards[0].metrics;
+  if (boards.length === 1) {
+    return {
+      deploymentFrequency: boards[0].deploymentFrequency,
+      leadTime: boards[0].leadTime,
+      cfr: boards[0].cfr,
+      mttr: boards[0].mttr,
+    };
+  }
 
   // Average across boards for the aggregate view
   const count = boards.length;
-  const sum = (extractor: (m: AggregatedMetrics) => MetricResult): MetricResult => {
-    const values = boards.map((b) => extractor(b.metrics));
+  const sum = (extractor: (b: BoardMetrics) => MetricResult): MetricResult => {
+    const values = boards.map((b) => extractor(b));
     const avgValue = values.reduce((s, v) => s + v.value, 0) / count;
 
     // Take the worst band
@@ -142,7 +182,8 @@ export default function DoraPage() {
     })
       .then((res) => {
         if (!cancelled) {
-          setMetrics(aggregateMetrics(res.boards));
+          const mapped = (res ?? []).map(mapBoardMetrics);
+          setMetrics(aggregateMetrics(mapped));
         }
       })
       .catch((err: unknown) => {

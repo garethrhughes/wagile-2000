@@ -81,7 +81,7 @@ export default function PlanningPage() {
       quarter: periodType === 'quarter' ? selectedQuarter ?? undefined : undefined,
     })
       .then((res) => {
-        if (!cancelled) setData(res.sprints);
+        if (!cancelled) setData(res ?? []);
       })
       .catch((err: unknown) => {
         if (!cancelled) {

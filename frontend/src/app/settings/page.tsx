@@ -93,7 +93,7 @@ export default function SettingsPage() {
   useEffect(() => {
     getBoards()
       .then((res) => {
-        const ids = res.boards.map((b) => b.boardId);
+        const ids = (res ?? []).map((b) => b.boardId);
         setBoardList(ids);
         if (ids.length > 0 && !activeBoard) setActiveBoard(ids[0]);
       })

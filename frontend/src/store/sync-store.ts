@@ -18,8 +18,8 @@ export const useSyncStore = create<SyncState>((set) => ({
       await triggerSync();
       const status = await getSyncStatus();
       const mapped: Record<string, string> = {};
-      for (const b of status.boards) {
-        mapped[b.boardId] = b.lastSyncedAt;
+      for (const b of status ?? []) {
+        if (b.lastSync) mapped[b.boardId] = b.lastSync;
       }
       set({ lastSynced: mapped });
     } finally {
@@ -31,8 +31,8 @@ export const useSyncStore = create<SyncState>((set) => ({
     try {
       const status = await getSyncStatus();
       const mapped: Record<string, string> = {};
-      for (const b of status.boards) {
-        mapped[b.boardId] = b.lastSyncedAt;
+      for (const b of status ?? []) {
+        if (b.lastSync) mapped[b.boardId] = b.lastSync;
       }
       set({ lastSynced: mapped });
     } catch {

@@ -58,42 +58,61 @@ export interface SprintInfo {
   state: string;
 }
 
-interface SyncStatusResponse {
-  boards: { boardId: string; lastSyncedAt: string; issueCount: number }[];
-}
-
-interface DoraMetricsResponse {
-  boards: {
-    boardId: string;
-    metrics: {
-      deploymentFrequency: MetricResult;
-      leadTime: MetricResult;
-      cfr: MetricResult;
-      mttr: MetricResult;
-    };
-  }[];
-}
-
-interface SingleMetricResponse {
-  boards: { boardId: string; metric: MetricResult }[];
-}
-
-interface PlanningAccuracyResponse {
+interface SyncStatusItem {
   boardId: string;
-  sprints: SprintAccuracy[];
+  lastSync: string | null;
+  status: string;
 }
 
-interface SprintsResponse {
-  sprints: SprintInfo[];
+type SyncStatusResponse = SyncStatusItem[];
+
+interface DoraMetricsBoard {
+  boardId: string;
+  period: { start: string; end: string };
+  deploymentFrequency: {
+    boardId: string;
+    totalDeployments: number;
+    deploymentsPerDay: number;
+    band: DoraBand;
+    periodDays: number;
+  };
+  leadTime: {
+    boardId: string;
+    medianDays: number;
+    p95Days: number;
+    band: DoraBand;
+    sampleSize: number;
+  };
+  changeFailureRate: {
+    boardId: string;
+    totalDeployments: number;
+    failureCount: number;
+    changeFailureRate: number;
+    band: DoraBand;
+  };
+  mttr: {
+    boardId: string;
+    medianHours: number;
+    band: DoraBand;
+    incidentCount: number;
+  };
 }
 
-interface QuartersResponse {
-  quarters: string[];
+type DoraMetricsResponse = DoraMetricsBoard[];
+
+type PlanningAccuracyResponse = SprintAccuracy[];
+
+export type SprintsResponse = SprintInfo[];
+
+interface QuarterInfo {
+  quarter: string;
+  startDate: string;
+  endDate: string;
 }
 
-interface BoardsResponse {
-  boards: BoardConfig[];
-}
+export type QuartersResponse = QuarterInfo[];
+
+type BoardsResponse = BoardConfig[];
 
 // ---- Error class ---------------------------------------------------------
 
@@ -196,7 +215,7 @@ export function getDoraMetrics(
 
 export function getDeploymentFrequency(
   params: MetricsQueryParams,
-): Promise<SingleMetricResponse> {
+): Promise<unknown[]> {
   return apiFetch(
     `/api/metrics/deployment-frequency${toQueryString({
       boardId: params.boardId,
@@ -209,7 +228,7 @@ export function getDeploymentFrequency(
 
 export function getLeadTime(
   params: MetricsQueryParams,
-): Promise<SingleMetricResponse> {
+): Promise<unknown[]> {
   return apiFetch(
     `/api/metrics/lead-time${toQueryString({
       boardId: params.boardId,
@@ -222,7 +241,7 @@ export function getLeadTime(
 
 export function getCfr(
   params: MetricsQueryParams,
-): Promise<SingleMetricResponse> {
+): Promise<unknown[]> {
   return apiFetch(
     `/api/metrics/cfr${toQueryString({
       boardId: params.boardId,
@@ -235,7 +254,7 @@ export function getCfr(
 
 export function getMttr(
   params: MetricsQueryParams,
-): Promise<SingleMetricResponse> {
+): Promise<unknown[]> {
   return apiFetch(
     `/api/metrics/mttr${toQueryString({
       boardId: params.boardId,

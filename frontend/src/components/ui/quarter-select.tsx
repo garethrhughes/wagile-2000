@@ -17,7 +17,7 @@ export function QuarterSelect({ value, onChange }: QuarterSelectProps) {
     setLoading(true);
     getQuarters()
       .then((res) => {
-        if (!cancelled) setQuarters(res.quarters);
+        if (!cancelled) setQuarters((res ?? []).map((q) => q.quarter));
       })
       .catch(() => {
         if (!cancelled) setQuarters([]);
