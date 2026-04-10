@@ -68,26 +68,35 @@ export class SyncService {
     });
 
     try {
-      // Ensure board config exists
-      await this.ensureBoardConfig(boardId);
+      // Ensure board config exists and get its type
+      const config = await this.ensureBoardConfig(boardId);
 
       // Resolve project key to numeric Jira board ID
       const numericBoardId = await this.resolveNumericBoardId(boardId);
 
-      // Sync sprints
-      const sprints = await this.syncSprints(boardId, numericBoardId);
-      this.logger.log(
-        `Synced ${sprints.length} sprints for board ${boardId}`,
-      );
-
-      // Sync issues per sprint (bulk)
       let totalIssues = 0;
       const allIssueKeys: string[] = [];
 
-      for (const sprint of sprints) {
-        const issues = await this.syncSprintIssues(boardId, numericBoardId, sprint.id);
-        totalIssues += issues.length;
+      if (config.boardType === 'kanban') {
+        // Kanban boards don't have sprints — fetch issues via JQL
+        const issues = await this.syncKanbanIssues(boardId);
+        totalIssues = issues.length;
         allIssueKeys.push(...issues.map((i) => i.key));
+        this.logger.log(
+          `Synced ${totalIssues} Kanban issues for board ${boardId}`,
+        );
+      } else {
+        // Scrum boards — sync via sprints
+        const sprints = await this.syncSprints(boardId, numericBoardId);
+        this.logger.log(
+          `Synced ${sprints.length} sprints for board ${boardId}`,
+        );
+
+        for (const sprint of sprints) {
+          const issues = await this.syncSprintIssues(boardId, numericBoardId, sprint.id);
+          totalIssues += issues.length;
+          allIssueKeys.push(...issues.map((i) => i.key));
+        }
       }
 
       // Sync changelogs in bulk for all issues
@@ -130,17 +139,44 @@ export class SyncService {
     return String(board.id);
   }
 
-  private async ensureBoardConfig(boardId: string): Promise<void> {
+  private async ensureBoardConfig(boardId: string): Promise<BoardConfig> {
     const existing = await this.boardConfigRepo.findOne({
       where: { boardId },
     });
-    if (!existing) {
-      const config = this.boardConfigRepo.create({
-        boardId,
-        boardType: boardId === 'PLAT' ? 'kanban' : 'scrum',
-      });
-      await this.boardConfigRepo.save(config);
+    if (existing) return existing;
+
+    const config = this.boardConfigRepo.create({
+      boardId,
+      boardType: boardId === 'PLAT' ? 'kanban' : 'scrum',
+    });
+    return this.boardConfigRepo.save(config);
+  }
+
+  private async syncKanbanIssues(boardId: string): Promise<JiraIssue[]> {
+    // Fetch recent issues for the Kanban project via JQL
+    const jql = `project = ${boardId} ORDER BY updated DESC`;
+    const allIssues: JiraIssue[] = [];
+    let startAt = 0;
+    let total = 0;
+
+    do {
+      const response = await this.jiraClient.searchIssues(jql, startAt, 100);
+      total = response.total;
+
+      const issues = response.issues.map((i) =>
+        this.mapJiraIssue(i, boardId, null),
+      );
+      allIssues.push(...issues);
+      startAt += response.maxResults;
+      // Cap at 1000 issues per Kanban board to avoid excessive API calls
+      if (startAt >= 1000) break;
+    } while (startAt < total);
+
+    if (allIssues.length > 0) {
+      await this.issueRepo.upsert(allIssues, ['key']);
     }
+
+    return allIssues;
   }
 
   private async syncSprints(boardId: string, numericBoardId: string): Promise<JiraSprint[]> {
@@ -197,7 +233,7 @@ export class SyncService {
   private mapJiraIssue(
     raw: JiraIssueValue,
     boardId: string,
-    sprintId: string,
+    sprintId: string | null,
   ): JiraIssue {
     const issue = new JiraIssue();
     issue.key = raw.key;
