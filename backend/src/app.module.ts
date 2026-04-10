@@ -12,6 +12,7 @@ import { MetricsModule } from './metrics/metrics.module.js';
 import { PlanningModule } from './planning/planning.module.js';
 import { RoadmapModule } from './roadmap/roadmap.module.js';
 import { SprintModule } from './sprint/sprint.module.js';
+import { QuarterModule } from './quarter/quarter.module.js';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { SprintModule } from './sprint/sprint.module.js';
     PlanningModule,
     RoadmapModule,
     SprintModule,
+    QuarterModule,
     HealthModule,
   ],
 })

@@ -379,7 +379,19 @@ export default function RoadmapPage() {
   // Quarter-mode table columns
   const quarterColumns = useMemo<Column<QuarterRow>[]>(
     () => [
-      { key: 'quarter', label: 'Quarter', sortable: true },
+      {
+        key: 'quarter',
+        label: 'Quarter',
+        sortable: true,
+        render: (value) => (
+          <Link
+            href={`/quarter/${encodeURIComponent(selectedBoard)}/${encodeURIComponent(String(value))}?from=roadmap`}
+            className="font-medium text-blue-600 hover:underline"
+          >
+            {String(value)}
+          </Link>
+        ),
+      },
       { key: 'totalIssues', label: 'Total Issues', sortable: true },
       { key: 'coveredIssues', label: 'Covered', sortable: true },
       { key: 'uncoveredIssues', label: 'Uncovered', sortable: true },
@@ -405,7 +417,7 @@ export default function RoadmapPage() {
         render: (value) => `${Number(value).toFixed(1)}%`,
       },
     ],
-    [],
+    [selectedBoard],
   );
 
   const hasData =

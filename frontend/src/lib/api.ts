@@ -403,3 +403,57 @@ export function getSprintDetail(
     `/api/sprints/${encodeURIComponent(boardId)}/${encodeURIComponent(sprintId)}/detail`,
   )
 }
+
+// ---- Quarter Detail types and endpoint -----------------------------------
+
+export interface QuarterDetailIssue {
+  key: string
+  summary: string
+  issueType: string
+  priority: string | null
+  status: string
+  points: number | null
+  epicKey: string | null
+  assignedQuarter: string
+  completedInQuarter: boolean
+  addedMidQuarter: boolean
+  linkedToRoadmap: boolean
+  isIncident: boolean
+  isFailure: boolean
+  labels: string[]
+  boardEntryDate: string
+  jiraUrl: string
+}
+
+export interface QuarterDetailSummary {
+  totalIssues: number
+  completedIssues: number
+  addedMidQuarter: number
+  linkedToRoadmap: number
+  totalPoints: number
+  completedPoints: number
+}
+
+export interface QuarterDetailBoardConfig {
+  boardType: string
+  doneStatusNames: string[]
+}
+
+export interface QuarterDetailResponse {
+  boardId: string
+  quarter: string
+  quarterStart: string
+  quarterEnd: string
+  summary: QuarterDetailSummary
+  issues: QuarterDetailIssue[]
+  boardConfig: QuarterDetailBoardConfig
+}
+
+export function getQuarterDetail(
+  boardId: string,
+  quarter: string,
+): Promise<QuarterDetailResponse> {
+  return apiFetch<QuarterDetailResponse>(
+    `/api/quarters/${encodeURIComponent(boardId)}/${encodeURIComponent(quarter)}/detail`,
+  )
+}
