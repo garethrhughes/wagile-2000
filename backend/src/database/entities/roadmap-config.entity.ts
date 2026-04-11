@@ -11,6 +11,12 @@ export class RoadmapConfig {
   @Column({ type: 'varchar', nullable: true })
   description!: string | null;
 
+  @Column({ type: 'varchar', nullable: true, default: null })
+  startDateFieldId!: string | null;
+
+  @Column({ type: 'varchar', nullable: true, default: null })
+  targetDateFieldId!: string | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;
 }

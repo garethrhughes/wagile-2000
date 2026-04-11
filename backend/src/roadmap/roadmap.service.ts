@@ -32,6 +32,12 @@ export interface RoadmapSprintAccuracy {
   roadmapDeliveryRate: number;
 }
 
+interface RoadmapItemWindow {
+  ideaKey: string;
+  startDate: Date;
+  targetDate: Date;
+}
+
 @Injectable()
 export class RoadmapService {
   private readonly logger = new Logger(RoadmapService.name);
@@ -111,9 +117,6 @@ export class RoadmapService {
       sprints = [...active, ...closed];
     }
 
-    // Build coveredEpicKeys scoped to configured JPD projects (B3 + M2)
-    const coveredEpicKeys = await this.loadCoveredEpicKeys();
-
     // Resolve doneStatusNames from board config
     const doneStatusNames: string[] =
       boardConfig?.doneStatusNames ?? ['Done', 'Closed', 'Released'];
@@ -135,14 +138,17 @@ export class RoadmapService {
       issuesBySprint.set(issue.sprintId, list);
     }
 
+    // Load all roadmap ideas once — filter per-sprint in memory
+    const allIdeasForSprints = await this.loadAllIdeas();
+
     const results: RoadmapSprintAccuracy[] = [];
     for (const sprint of sprints) {
       const sprintIssues = issuesBySprint.get(sprint.id) ?? [];
       const accuracy = await this.calculateSprintAccuracy(
         sprint,
         sprintIssues,
-        coveredEpicKeys,
         doneStatusNames,
+        allIdeasForSprints,
       );
       results.push(accuracy);
     }
@@ -160,7 +166,6 @@ export class RoadmapService {
     boardConfig: BoardConfig | null,
     quarter?: string,
   ): Promise<RoadmapSprintAccuracy[]> {
-    const coveredEpicKeys = await this.loadCoveredEpicKeys();
     const doneStatusNames: string[] =
       boardConfig?.doneStatusNames ?? ['Done', 'Closed', 'Released'];
     const backlogStatusIds: string[] = boardConfig?.backlogStatusIds ?? [];
@@ -235,6 +240,39 @@ export class RoadmapService {
       return [];
     }
 
+    // Bulk-load all status changelogs for completion date / activity-start mapping
+    const allBoundedKeys = boundedIssues.map((i) => i.key);
+    const doneChangelogs = await this.changelogRepo
+      .createQueryBuilder('cl')
+      .where('cl.issueKey IN (:...keys)', { keys: allBoundedKeys })
+      .andWhere('cl.field = :field', { field: 'status' })
+      .orderBy('cl.changedAt', 'ASC')
+      .getMany();
+
+    // Build map: issueKey → first done-transition changedAt
+    const completionDates = new Map<string, Date>();
+    // Build map: issueKey → first non-done transition changedAt (activity start).
+    // NOTE: The Kanban path defines "activity start" as the first transition TO a
+    // non-done status (i.e. the first time work was picked up or re-opened). The
+    // sprint path (calculateSprintAccuracy) instead uses the first status transition
+    // of *any* kind. The difference is low-risk — it only affects re-opened issues —
+    // but is intentional: Kanban activity-start is board-pull semantics, sprint
+    // activity-start is first-touch semantics. Both paths fall back to createdAt
+    // when no changelog entry exists.
+    const activityStartDates = new Map<string, Date>();
+    for (const cl of doneChangelogs) {
+      if (cl.toValue !== null && doneStatusNames.includes(cl.toValue)) {
+        if (!completionDates.has(cl.issueKey)) {
+          completionDates.set(cl.issueKey, cl.changedAt);
+        }
+      } else {
+        // First transition to a non-done status = activity start
+        if (!activityStartDates.has(cl.issueKey)) {
+          activityStartDates.set(cl.issueKey, cl.changedAt);
+        }
+      }
+    }
+
     // Group issues by the quarter of their board-entry date (fall back to createdAt)
     const quarterMap = new Map<string, JiraIssue[]>();
     for (const issue of boundedIssues) {
@@ -253,16 +291,28 @@ export class RoadmapService {
     const now = new Date();
     const currentQuarterKey = this.issueToQuarterKey(now);
 
+    // Load all ideas once — filter per-quarter in memory (avoids N×2 DB queries)
+    const allIdeas = await this.loadAllIdeas();
+
     const results: RoadmapSprintAccuracy[] = [];
     for (const qKey of filteredKeys) {
       const issues = quarterMap.get(qKey)!;
-      const { startDate } = this.quarterToDates(qKey);
+      const { startDate, endDate } = this.quarterToDates(qKey);
       const state = qKey === currentQuarterKey ? 'active' : 'closed';
 
-      const coveredIssues = issues.filter(
-        (i) => i.epicKey !== null && coveredEpicKeys.has(i.epicKey),
-      );
-      const coveredKeys = new Set(coveredIssues.map((i) => i.key));
+      const activeIdeas = this.filterIdeasForWindow(allIdeas, startDate, endDate);
+
+      const eligibleCoveredIssues = issues.filter((i) => {
+        if (i.epicKey === null || !activeIdeas.has(i.epicKey)) return false;
+        const item = activeIdeas.get(i.epicKey)!;
+        const issueActivityStart = activityStartDates.get(i.key) ?? i.createdAt;
+        // Conservative: issues already in done status get null (treated as in-flight)
+        const issueActivityEnd = doneStatusNames.includes(i.status)
+          ? null
+          : (completionDates.get(i.key) ?? null);
+        return this.isIssueEligibleForRoadmapItem(issueActivityStart, issueActivityEnd, item);
+      });
+      const eligibleCoveredKeys = new Set(eligibleCoveredIssues.map((i) => i.key));
 
       const completedKeys = new Set<string>(
         issues
@@ -271,9 +321,9 @@ export class RoadmapService {
       );
 
       const totalIssues = issues.length;
-      const coveredCount = coveredIssues.length;
+      const coveredCount = eligibleCoveredIssues.length;
       const linkedCompletedIssues = [...completedKeys].filter((k) =>
-        coveredKeys.has(k),
+        eligibleCoveredKeys.has(k),
       ).length;
 
       results.push({
@@ -299,17 +349,94 @@ export class RoadmapService {
     return results;
   }
 
-  /** Load covered epic keys scoped to configured JPD projects, filtering empty strings (B3 + M2). */
-  private async loadCoveredEpicKeys(): Promise<Set<string>> {
+  /**
+   * Load all JPD ideas from configured projects in a single pair of DB
+   * queries. Returned ideas retain their raw date fields; use
+   * filterIdeasForWindow() to apply a date-window filter in memory.
+   */
+  private async loadAllIdeas(): Promise<JpdIdea[]> {
     const configs = await this.roadmapConfigRepo.find();
-    if (configs.length === 0) return new Set();
+    if (configs.length === 0) return [];
     const jpdKeys = configs.map((c) => c.jpdKey);
-    const ideas = await this.jpdIdeaRepo.find({ where: { jpdKey: In(jpdKeys) } });
-    return new Set<string>(
-      ideas
-        .flatMap((idea) => idea.deliveryIssueKeys ?? [])
-        .filter(Boolean),
-    );
+    return this.jpdIdeaRepo.find({ where: { jpdKey: In(jpdKeys) } });
+  }
+
+  /**
+   * Filter a pre-loaded idea list to those whose delivery window overlaps
+   * [windowStart, windowEnd], returning a Map keyed by epic key.
+   * Ideas without both startDate and targetDate are excluded (decision 2).
+   * Conflict resolution: if multiple ideas link the same epic key, keep
+   * the one with the later targetDate.
+   *
+   * This is pure in-memory arithmetic — no DB access.
+   */
+  private filterIdeasForWindow(
+    ideas: JpdIdea[],
+    windowStart: Date,
+    windowEnd: Date,
+  ): Map<string, RoadmapItemWindow> {
+    const result = new Map<string, RoadmapItemWindow>();
+
+    for (const idea of ideas) {
+      if (!idea.deliveryIssueKeys) continue;
+
+      // Decision 2: ideas without BOTH dates are excluded entirely.
+      if (idea.startDate === null || idea.targetDate === null) continue;
+
+      // Date-window overlap filter:
+      //   idea.targetDate >= windowStart  AND  idea.startDate <= windowEnd
+      if (idea.targetDate < windowStart || idea.startDate > windowEnd) continue;
+
+      for (const epicKey of idea.deliveryIssueKeys.filter(Boolean)) {
+        const existing = result.get(epicKey);
+        if (!existing) {
+          result.set(epicKey, {
+            ideaKey: idea.key,
+            startDate: idea.startDate,
+            targetDate: idea.targetDate,
+          });
+        } else {
+          // Prefer the window with the later targetDate (most recent delivery commitment)
+          if (idea.targetDate.getTime() > existing.targetDate.getTime()) {
+            result.set(epicKey, {
+              ideaKey: idea.key,
+              startDate: idea.startDate,
+              targetDate: idea.targetDate,
+            });
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Returns true if the issue's activity window overlaps the roadmap item's
+   * delivery window.
+   *
+   * Per architect note: gate on issueActivityStart <= targetDate only (not
+   * issueActivityEnd). E6: an issue that started before the target but
+   * finished after it still counts — late delivery is a rate miss, not an
+   * exclusion.
+   *
+   * issueActivityEnd === null means the issue is in-flight; it always
+   * qualifies the afterStart side of the check (conservative).
+   */
+  private isIssueEligibleForRoadmapItem(
+    issueActivityStart: Date,
+    issueActivityEnd: Date | null,
+    item: RoadmapItemWindow,
+  ): boolean {
+    // Issue must have started at or before the roadmap item's target date
+    const beforeTarget = issueActivityStart <= item.targetDate;
+
+    // Issue must not have been completed before the roadmap item's start date
+    const afterStart =
+      issueActivityEnd === null || // in-flight: always qualifies
+      issueActivityEnd >= item.startDate;
+
+    return beforeTarget && afterStart;
   }
 
   private issueToQuarterKey(date: Date): string {
@@ -371,7 +498,6 @@ export class RoadmapService {
     boardConfig: BoardConfig | null,
     week?: string,
   ): Promise<RoadmapSprintAccuracy[]> {
-    const coveredEpicKeys = await this.loadCoveredEpicKeys();
     const doneStatusNames: string[] =
       boardConfig?.doneStatusNames ?? ['Done', 'Closed', 'Released'];
     const backlogStatusIds: string[] = boardConfig?.backlogStatusIds ?? [];
@@ -446,6 +572,34 @@ export class RoadmapService {
       return [];
     }
 
+    // Bulk-load done-transition changelogs for completion date / activity-start mapping
+    const allWeeklyKeys = boundedIssuesWeekly.map((i) => i.key);
+    const doneChangelogsWeekly = await this.changelogRepo
+      .createQueryBuilder('cl')
+      .where('cl.issueKey IN (:...keys)', { keys: allWeeklyKeys })
+      .andWhere('cl.field = :field', { field: 'status' })
+      .orderBy('cl.changedAt', 'ASC')
+      .getMany();
+
+    // Build map: issueKey → first done-transition changedAt
+    const completionDatesWeekly = new Map<string, Date>();
+    // Build map: issueKey → first non-done transition changedAt (activity start).
+    // NOTE: See getKanbanAccuracy for a note on the intentional difference between
+    // this Kanban "board-pull semantics" definition and the sprint path's
+    // "first-touch semantics" in calculateSprintAccuracy.
+    const activityStartDatesWeekly = new Map<string, Date>();
+    for (const cl of doneChangelogsWeekly) {
+      if (cl.toValue !== null && doneStatusNames.includes(cl.toValue)) {
+        if (!completionDatesWeekly.has(cl.issueKey)) {
+          completionDatesWeekly.set(cl.issueKey, cl.changedAt);
+        }
+      } else {
+        if (!activityStartDatesWeekly.has(cl.issueKey)) {
+          activityStartDatesWeekly.set(cl.issueKey, cl.changedAt);
+        }
+      }
+    }
+
     // Group issues by the week of their board-entry date (fall back to createdAt)
     const weekMap = new Map<string, JiraIssue[]>();
     for (const issue of boundedIssuesWeekly) {
@@ -464,16 +618,28 @@ export class RoadmapService {
     const now = new Date();
     const currentWeekKey = this.dateToWeekKey(now);
 
+    // Load all ideas once — filter per-week in memory (avoids N×2 DB queries)
+    const allIdeasWeekly = await this.loadAllIdeas();
+
     const results: RoadmapSprintAccuracy[] = [];
     for (const wKey of filteredKeys) {
       const issues = weekMap.get(wKey)!;
-      const { weekStart } = this.weekKeyToDates(wKey);
+      const { weekStart, weekEnd } = this.weekKeyToDates(wKey);
       const state = wKey === currentWeekKey ? 'active' : 'closed';
 
-      const coveredIssues = issues.filter(
-        (i) => i.epicKey !== null && coveredEpicKeys.has(i.epicKey),
-      );
-      const coveredKeys = new Set(coveredIssues.map((i) => i.key));
+      const activeIdeas = this.filterIdeasForWindow(allIdeasWeekly, weekStart, weekEnd);
+
+      const eligibleCoveredIssues = issues.filter((i) => {
+        if (i.epicKey === null || !activeIdeas.has(i.epicKey)) return false;
+        const item = activeIdeas.get(i.epicKey)!;
+        const issueActivityStart = activityStartDatesWeekly.get(i.key) ?? i.createdAt;
+        // Conservative: issues already in done status get null (treated as in-flight)
+        const issueActivityEnd = doneStatusNames.includes(i.status)
+          ? null
+          : (completionDatesWeekly.get(i.key) ?? null);
+        return this.isIssueEligibleForRoadmapItem(issueActivityStart, issueActivityEnd, item);
+      });
+      const eligibleCoveredKeys = new Set(eligibleCoveredIssues.map((i) => i.key));
 
       const completedKeys = new Set<string>(
         issues
@@ -482,9 +648,9 @@ export class RoadmapService {
       );
 
       const totalIssues = issues.length;
-      const coveredCount = coveredIssues.length;
+      const coveredCount = eligibleCoveredIssues.length;
       const linkedCompletedIssues = [...completedKeys].filter((k) =>
-        coveredKeys.has(k),
+        eligibleCoveredKeys.has(k),
       ).length;
 
       results.push({
@@ -513,8 +679,8 @@ export class RoadmapService {
   private async calculateSprintAccuracy(
     sprint: JiraSprint,
     sprintIssues: JiraIssue[],
-    coveredEpicKeys: Set<string>,
     doneStatusNames: string[],
+    allIdeas: JpdIdea[],
   ): Promise<RoadmapSprintAccuracy> {
     const filteredIssues = sprintIssues.filter(
       (i) => isWorkItem(i.issueType),
@@ -524,18 +690,21 @@ export class RoadmapService {
       return this.emptyAccuracy(sprint);
     }
 
-    // Classify covered issues
-    const coveredIssues = filteredIssues.filter(
-      (i) => i.epicKey !== null && coveredEpicKeys.has(i.epicKey),
-    );
-    const coveredKeys = new Set(coveredIssues.map((i) => i.key));
+    const sprintStart = sprint.startDate ?? new Date(0);
+    const sprintEnd = sprint.endDate ?? new Date();
 
-    // Build completed set — check current status first, then changelogs for remainder
+    // Filter pre-loaded ideas for this sprint window (no DB round-trip per sprint)
+    const activeIdeas = this.filterIdeasForWindow(allIdeas, sprintStart, sprintEnd);
+
+    // Build completed set — check current status first, then changelogs for remainder.
+    // Also capture completion timestamps for issues found via changelog.
     const completedKeys = new Set<string>();
+    const completionDates = new Map<string, Date>(); // issueKey → first done changedAt in sprint
     const needsChangelogCheck: string[] = [];
 
     for (const issue of filteredIssues) {
       if (doneStatusNames.includes(issue.status)) {
+        // Already done; conservative: treat completionDate as null (in-flight for overlap)
         completedKeys.add(issue.key);
       } else {
         needsChangelogCheck.push(issue.key);
@@ -544,27 +713,58 @@ export class RoadmapService {
 
     // Only query changelogs for issues not already in done status
     if (needsChangelogCheck.length > 0) {
-      const sprintStart = sprint.startDate ?? new Date(0);
-      const sprintEnd = sprint.endDate ?? new Date();
-
       const changelogs = await this.changelogRepo
         .createQueryBuilder('cl')
         .where('cl.issueKey IN (:...keys)', { keys: needsChangelogCheck })
         .andWhere('cl.field = :field', { field: 'status' })
         .andWhere('cl.changedAt >= :start', { start: sprintStart })
         .andWhere('cl.changedAt <= :end', { end: sprintEnd })
+        .orderBy('cl.changedAt', 'ASC')
         .getMany();
 
       for (const cl of changelogs) {
         if (cl.toValue !== null && doneStatusNames.includes(cl.toValue)) {
           completedKeys.add(cl.issueKey);
+          if (!completionDates.has(cl.issueKey)) {
+            completionDates.set(cl.issueKey, cl.changedAt);
+          }
         }
       }
     }
 
+    // Query activity-start timestamps: first status transition for each issue
+    const allFilteredKeys = filteredIssues.map((i) => i.key);
+    const activityStartChangelogs = await this.changelogRepo
+      .createQueryBuilder('cl')
+      .where('cl.issueKey IN (:...keys)', { keys: allFilteredKeys })
+      .andWhere('cl.field = :field', { field: 'status' })
+      .orderBy('cl.changedAt', 'ASC')
+      .getMany();
+
+    const activityStartDates = new Map<string, Date>();
+    for (const cl of activityStartChangelogs) {
+      if (!activityStartDates.has(cl.issueKey)) {
+        // First status transition = activity start regardless of direction
+        activityStartDates.set(cl.issueKey, cl.changedAt);
+      }
+    }
+
+    // Classify covered issues with eligibility check
+    const eligibleCoveredIssues = filteredIssues.filter((i) => {
+      if (i.epicKey === null || !activeIdeas.has(i.epicKey)) return false;
+      const item = activeIdeas.get(i.epicKey)!;
+      const issueActivityStart = activityStartDates.get(i.key) ?? i.createdAt;
+      // Conservative: issues already in done status get null (treated as in-flight)
+      const issueActivityEnd = doneStatusNames.includes(i.status)
+        ? null
+        : (completionDates.get(i.key) ?? null);
+      return this.isIssueEligibleForRoadmapItem(issueActivityStart, issueActivityEnd, item);
+    });
+    const eligibleCoveredKeys = new Set(eligibleCoveredIssues.map((i) => i.key));
+
     // Compute metrics
     const totalIssues = filteredIssues.length;
-    const coveredCount = coveredIssues.length;
+    const coveredCount = eligibleCoveredIssues.length;
     const uncoveredIssues = totalIssues - coveredCount;
     const roadmapCoverage =
       totalIssues > 0
@@ -572,7 +772,7 @@ export class RoadmapService {
         : 0;
 
     const linkedCompletedIssues = [...completedKeys].filter((k) =>
-      coveredKeys.has(k),
+      eligibleCoveredKeys.has(k),
     ).length;
     const roadmapDeliveryRate =
       coveredCount > 0
@@ -638,6 +838,24 @@ export class RoadmapService {
       description: description ?? null,
     });
     return this.roadmapConfigRepo.save(config);
+  }
+
+  async updateConfig(
+    id: number,
+    startDateFieldId?: string | null,
+    targetDateFieldId?: string | null,
+  ): Promise<RoadmapConfig> {
+    const existing = await this.roadmapConfigRepo.findOne({ where: { id } });
+    if (!existing) {
+      throw new NotFoundException(`Roadmap config with id ${id} not found`);
+    }
+    if (startDateFieldId !== undefined) {
+      existing.startDateFieldId = startDateFieldId;
+    }
+    if (targetDateFieldId !== undefined) {
+      existing.targetDateFieldId = targetDateFieldId;
+    }
+    return this.roadmapConfigRepo.save(existing);
   }
 
   async deleteConfig(id: number): Promise<void> {

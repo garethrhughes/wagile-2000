@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Query,
   Param,
@@ -12,6 +13,7 @@ import { ApiTags, ApiOperation, ApiParam } from '@nestjs/swagger';
 import { RoadmapService } from './roadmap.service.js';
 import { RoadmapAccuracyQueryDto } from './dto/roadmap-accuracy-query.dto.js';
 import { CreateRoadmapConfigDto } from './dto/create-roadmap-config.dto.js';
+import { UpdateRoadmapConfigDto } from './dto/update-roadmap-config.dto.js';
 
 @ApiTags('roadmap')
 @Controller('api/roadmap')
@@ -39,6 +41,16 @@ export class RoadmapController {
     return this.roadmapService.createConfig(dto.jpdKey, dto.description);
   }
 
+  @ApiOperation({ summary: 'Update date field IDs on a JPD roadmap config' })
+  @ApiParam({ name: 'id', description: 'Numeric roadmap config id' })
+  @Patch('configs/:id')
+  async updateConfig(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateRoadmapConfigDto,
+  ) {
+    return this.roadmapService.updateConfig(id, dto.startDateFieldId, dto.targetDateFieldId);
+  }
+
   @ApiOperation({ summary: 'Remove a JPD roadmap config by id' })
   @ApiParam({ name: 'id', description: 'Numeric roadmap config id' })
   @Delete('configs/:id')
@@ -52,3 +64,4 @@ export class RoadmapController {
     return this.roadmapService.syncRoadmaps();
   }
 }
+

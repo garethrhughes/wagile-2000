@@ -370,6 +370,8 @@ export interface RoadmapConfig {
   id: number;
   jpdKey: string;
   description: string | null;
+  startDateFieldId: string | null;
+  targetDateFieldId: string | null;
   createdAt: string;
 }
 
@@ -416,6 +418,16 @@ export function createRoadmapConfig(body: {
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+export function updateRoadmapConfig(
+  id: number,
+  body: { startDateFieldId?: string | null; targetDateFieldId?: string | null },
+): Promise<RoadmapConfig> {
+  return apiFetch(`/api/roadmap/configs/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
 }
 
 export function deleteRoadmapConfig(id: number): Promise<void> {

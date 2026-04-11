@@ -8,11 +8,12 @@ import {
   updateBoardConfig,
   getRoadmapConfigs,
   createRoadmapConfig,
+  updateRoadmapConfig,
   deleteRoadmapConfig,
   triggerRoadmapSync,
   type BoardConfig,
   type RoadmapConfig,
-} from '@/lib/api';
+} from '@/lib/api'
 
 // ---------------------------------------------------------------------------
 // Toast helper
@@ -94,6 +95,11 @@ export default function SettingsPage() {
   const [newJpdKey, setNewJpdKey] = useState('');
   const [jpdSyncing, setJpdSyncing] = useState(false);
   const [jpdAdding, setJpdAdding] = useState(false);
+  // Per-config field-ID draft values: configId → { startDateFieldId, targetDateFieldId }
+  const [fieldIdDrafts, setFieldIdDrafts] = useState<
+    Record<number, { startDateFieldId: string; targetDateFieldId: string }>
+  >({});
+  const [fieldIdSaving, setFieldIdSaving] = useState<Record<number, boolean>>({});
 
   // Load board list
   useEffect(() => {
@@ -108,7 +114,18 @@ export default function SettingsPage() {
       });
     setJpdConfigsLoading(true);
     getRoadmapConfigs()
-      .then(setJpdConfigs)
+      .then((configs) => {
+        setJpdConfigs(configs)
+        // Initialise draft values from loaded configs
+        const drafts: Record<number, { startDateFieldId: string; targetDateFieldId: string }> = {}
+        for (const cfg of configs) {
+          drafts[cfg.id] = {
+            startDateFieldId: cfg.startDateFieldId ?? '',
+            targetDateFieldId: cfg.targetDateFieldId ?? '',
+          }
+        }
+        setFieldIdDrafts(drafts)
+      })
       .catch(() => {})
       .finally(() => setJpdConfigsLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -338,37 +355,129 @@ export default function SettingsPage() {
           <div className="space-y-4">
             {/* Existing configs list */}
             {jpdConfigs.length > 0 && (
-              <div className="space-y-2">
+              <div className="space-y-4">
                 {jpdConfigs.map((cfg) => (
                   <div
                     key={cfg.id}
-                    className="flex items-center justify-between rounded-lg border border-border bg-background px-4 py-3"
+                    className="rounded-lg border border-border bg-background p-4 space-y-3"
                   >
-                    <div className="flex items-center gap-3">
-                      <code className="rounded bg-gray-100 px-2 py-0.5 text-sm font-mono">
-                        {cfg.jpdKey}
-                      </code>
-                      {cfg.description && (
-                        <span className="text-sm text-muted">{cfg.description}</span>
-                      )}
+                    {/* Header row */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <code className="rounded bg-gray-100 px-2 py-0.5 text-sm font-mono">
+                          {cfg.jpdKey}
+                        </code>
+                        {cfg.description && (
+                          <span className="text-sm text-muted">{cfg.description}</span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          deleteRoadmapConfig(cfg.id)
+                            .then(() => {
+                              setJpdConfigs((prev) => prev.filter((c) => c.id !== cfg.id))
+                              setFieldIdDrafts((prev) => {
+                                const next = { ...prev }
+                                delete next[cfg.id]
+                                return next
+                              })
+                              show('success', `Removed JPD config for ${cfg.jpdKey}`)
+                            })
+                            .catch(() => {
+                              show('error', `Failed to delete config for ${cfg.jpdKey}`)
+                            })
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        deleteRoadmapConfig(cfg.id)
-                          .then(() => {
-                            setJpdConfigs((prev) => prev.filter((c) => c.id !== cfg.id));
-                            show('success', `Removed JPD config for ${cfg.jpdKey}`);
+
+                    {/* Date field ID inputs */}
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1.5 block text-xs font-medium text-muted">
+                          Start Date Field ID
+                        </label>
+                        <input
+                          type="text"
+                          value={fieldIdDrafts[cfg.id]?.startDateFieldId ?? ''}
+                          onChange={(e) =>
+                            setFieldIdDrafts((prev) => ({
+                              ...prev,
+                              [cfg.id]: {
+                                ...prev[cfg.id],
+                                startDateFieldId: e.target.value,
+                              },
+                            }))
+                          }
+                          placeholder="e.g. customfield_10015"
+                          className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm placeholder:text-muted focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-xs font-medium text-muted">
+                          Target Date Field ID
+                        </label>
+                        <input
+                          type="text"
+                          value={fieldIdDrafts[cfg.id]?.targetDateFieldId ?? ''}
+                          onChange={(e) =>
+                            setFieldIdDrafts((prev) => ({
+                              ...prev,
+                              [cfg.id]: {
+                                ...prev[cfg.id],
+                                targetDateFieldId: e.target.value,
+                              },
+                            }))
+                          }
+                          placeholder="e.g. customfield_10021"
+                          className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm placeholder:text-muted focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        />
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted">
+                      Jira custom field IDs for date-filtered roadmap accuracy. Find these in your Jira admin under Project → Fields. Trigger a Roadmap Sync after saving.
+                    </p>
+
+                    {/* Save field IDs button */}
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        disabled={fieldIdSaving[cfg.id] === true}
+                        onClick={() => {
+                          const draft = fieldIdDrafts[cfg.id]
+                          if (!draft) return
+                          setFieldIdSaving((prev) => ({ ...prev, [cfg.id]: true }))
+                          updateRoadmapConfig(cfg.id, {
+                            startDateFieldId: draft.startDateFieldId.trim() || null,
+                            targetDateFieldId: draft.targetDateFieldId.trim() || null,
                           })
-                          .catch(() => {
-                            show('error', `Failed to delete config for ${cfg.jpdKey}`);
-                          });
-                      }}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete
-                    </button>
+                            .then((updated) => {
+                              setJpdConfigs((prev) =>
+                                prev.map((c) => (c.id === updated.id ? updated : c)),
+                              )
+                              show('success', `Saved field IDs for ${cfg.jpdKey}`)
+                            })
+                            .catch(() => {
+                              show('error', `Failed to save field IDs for ${cfg.jpdKey}`)
+                            })
+                            .finally(() => {
+                              setFieldIdSaving((prev) => ({ ...prev, [cfg.id]: false }))
+                            })
+                        }}
+                        className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {fieldIdSaving[cfg.id] === true ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4" />
+                        )}
+                        {fieldIdSaving[cfg.id] === true ? 'Saving…' : 'Save Field IDs'}
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -396,9 +505,13 @@ export default function SettingsPage() {
                   setJpdAdding(true);
                   createRoadmapConfig({ jpdKey: key })
                     .then((cfg) => {
-                      setJpdConfigs((prev) => [...prev, cfg]);
-                      setNewJpdKey('');
-                      show('success', `Added JPD config for ${cfg.jpdKey}`);
+                      setJpdConfigs((prev) => [...prev, cfg])
+                      setFieldIdDrafts((prev) => ({
+                        ...prev,
+                        [cfg.id]: { startDateFieldId: '', targetDateFieldId: '' },
+                      }))
+                      setNewJpdKey('')
+                      show('success', `Added JPD config for ${cfg.jpdKey}`)
                     })
                     .catch(() => {
                       show('error', 'Failed to add JPD config');

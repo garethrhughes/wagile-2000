@@ -17,6 +17,12 @@ export class JpdIdea {
   @Column('simple-array', { nullable: true })
   deliveryIssueKeys!: string[] | null;
 
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  startDate!: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true, default: null })
+  targetDate!: Date | null;
+
   @UpdateDateColumn({ type: 'timestamptz' })
   syncedAt!: Date;
 }

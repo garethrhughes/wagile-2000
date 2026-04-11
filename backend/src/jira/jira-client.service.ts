@@ -82,11 +82,14 @@ export class JiraClientService {
 
   async getJpdIdeas(
     jpdKey: string,
+    extraFields: string[] = [],
     nextPageToken?: string,
   ): Promise<JiraIssueSearchResponse> {
+    const baseFields = ['summary', 'status', 'issuelinks'];
+    const fields = [...baseFields, ...extraFields].join(',');
     const params = new URLSearchParams({
       jql: `project=${jpdKey} ORDER BY updated DESC`,
-      fields: 'summary,status,issuelinks',
+      fields,
       maxResults: '100',
     });
     if (nextPageToken) {

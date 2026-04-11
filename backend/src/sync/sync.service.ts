@@ -435,11 +435,17 @@ export class SyncService {
   }
 
   private async syncJpdProject(jpdKey: string): Promise<void> {
+    // Load the roadmap config for this JPD project to get date field IDs
+    const config = await this.roadmapConfigRepo.findOne({ where: { jpdKey } });
+    const extraFields: string[] = [];
+    if (config?.startDateFieldId) extraFields.push(config.startDateFieldId);
+    if (config?.targetDateFieldId) extraFields.push(config.targetDateFieldId);
+
     let nextPageToken: string | undefined;
     const ideas: JpdIdea[] = [];
 
     do {
-      const response = await this.jiraClient.getJpdIdeas(jpdKey, nextPageToken);
+      const response = await this.jiraClient.getJpdIdeas(jpdKey, extraFields, nextPageToken);
 
       for (const issue of response.issues) {
         const deliveryIssueKeys: string[] = [];
@@ -472,6 +478,17 @@ export class SyncService {
         idea.status = issue.fields.status.name;
         idea.jpdKey = jpdKey;
         idea.deliveryIssueKeys = deliveryIssueKeys.length > 0 ? deliveryIssueKeys : null;
+
+        // Extract date fields if configured
+        const rawStart = config?.startDateFieldId
+          ? (issue.fields[config.startDateFieldId] as string | null | undefined) ?? null
+          : null;
+        const rawTarget = config?.targetDateFieldId
+          ? (issue.fields[config.targetDateFieldId] as string | null | undefined) ?? null
+          : null;
+        idea.startDate = rawStart ? new Date(rawStart) : null;
+        idea.targetDate = rawTarget ? new Date(rawTarget) : null;
+
         ideas.push(idea);
       }
 
@@ -480,6 +497,19 @@ export class SyncService {
 
     if (ideas.length > 0) {
       await this.jpdIdeaRepo.upsert(ideas, ['key']);
+
+      // Warn only when targetDateFieldId is configured but produced no dates —
+      // avoids log spam before the operator has set up field IDs.
+      if (
+        config?.targetDateFieldId &&
+        ideas.every((idea) => idea.targetDate === null)
+      ) {
+        this.logger.warn(
+          `[${jpdKey}] targetDateFieldId "${config.targetDateFieldId}" is configured but ` +
+          `all ${ideas.length} JPD ideas have null targetDate after sync. ` +
+          `Check the field ID is correct for this tenant and trigger a resync.`,
+        );
+      }
     }
 
     this.logger.log(`Synced ${ideas.length} JPD ideas for project ${jpdKey}`);

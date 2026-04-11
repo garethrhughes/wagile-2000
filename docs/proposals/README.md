@@ -11,3 +11,4 @@
 | [0007](0007-cycle-time-report.md) | Cycle Time Report | Accepted | 2026-04-11 |
 | [0008](0008-exclude-epics-from-metrics.md) | Exclude Epics and Sub-tasks from all metric calculations | Accepted | 2026-04-11 |
 | [0009](0009-remove-api-key-auth.md) | Remove API key authentication | Proposed | 2026-04-12 |
+| [0010](0010-roadmap-accuracy-date-filtering.md) | Roadmap Accuracy Date Filtering | Proposed | 2026-04-12 |
