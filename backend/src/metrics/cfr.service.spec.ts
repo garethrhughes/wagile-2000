@@ -8,7 +8,7 @@ import {
   JiraIssueLink,
 } from '../database/entities/index.js';
 
-function mockRepo<T>(): jest.Mocked<Repository<T>> {
+function mockRepo<T extends object>(): jest.Mocked<Repository<T>> {
   return {
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(null),
@@ -68,7 +68,9 @@ describe('CfrService', () => {
       doneStatusNames: ['Done'],
       failureIssueTypes: ['Bug'],
       failureLabels: [],
-    } as BoardConfig);
+      inProgressStatusNames: ['In Progress'],
+      dataStartDate: null,
+    } as unknown as BoardConfig);
 
     // 10 issues total: 2 Bugs, 8 Stories
     issueRepo.find.mockImplementation(async (opts) => {
@@ -87,7 +89,7 @@ describe('CfrService', () => {
         { key: 'ACC-8', boardId: 'ACC', issueType: 'Story', labels: [] },
         { key: 'ACC-9', boardId: 'ACC', issueType: 'Story', labels: [] },
         { key: 'ACC-10', boardId: 'ACC', issueType: 'Story', labels: [] },
-      ] as JiraIssue[];
+      ] as unknown as JiraIssue[];
     });
 
     // All 10 reached Done
@@ -132,7 +134,9 @@ describe('CfrService', () => {
       doneStatusNames: ['Done'],
       failureIssueTypes: [],
       failureLabels: ['regression'],
-    } as BoardConfig);
+      inProgressStatusNames: ['In Progress'],
+      dataStartDate: null,
+    } as unknown as BoardConfig);
 
     issueRepo.find.mockImplementation(async (opts) => {
       if (opts && typeof opts === 'object' && 'where' in opts) {
@@ -144,7 +148,7 @@ describe('CfrService', () => {
         { key: 'ACC-2', boardId: 'ACC', issueType: 'Story', labels: [] },
         { key: 'ACC-3', boardId: 'ACC', issueType: 'Story', labels: [] },
         { key: 'ACC-4', boardId: 'ACC', issueType: 'Story', labels: [] },
-      ] as JiraIssue[];
+      ] as unknown as JiraIssue[];
     });
 
     const qb = {

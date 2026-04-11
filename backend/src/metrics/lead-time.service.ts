@@ -8,6 +8,8 @@ import {
   BoardConfig,
 } from '../database/entities/index.js';
 import { classifyLeadTime, type DoraBand } from './dora-bands.js';
+import { percentile, round2 } from './statistics.js';
+import { isWorkItem } from './issue-type-filters.js';
 
 export interface LeadTimeResult {
   boardId: string;
@@ -30,11 +32,15 @@ export class LeadTimeService {
     private readonly boardConfigRepo: Repository<BoardConfig>,
   ) {}
 
-  async calculate(
+  /**
+   * Returns the raw sorted lead-time-days observations for a board/period.
+   * Used by MetricsService.getDoraAggregate() for pooled-median computation.
+   */
+  async getLeadTimeObservations(
     boardId: string,
     startDate: Date,
     endDate: Date,
-  ): Promise<LeadTimeResult> {
+  ): Promise<number[]> {
     const config = await this.boardConfigRepo.findOne({
       where: { boardId },
     });
@@ -46,19 +52,11 @@ export class LeadTimeService {
     const isKanban = config?.boardType === 'kanban';
 
     // Get all issues for this board
-    const issues = await this.issueRepo.find({
+    const issues = (await this.issueRepo.find({
       where: { boardId },
-    });
+    })).filter((i) => isWorkItem(i.issueType));
 
-    if (issues.length === 0) {
-      return {
-        boardId,
-        medianDays: 0,
-        p95Days: 0,
-        band: classifyLeadTime(0),
-        sampleSize: 0,
-      };
-    }
+    if (issues.length === 0) return [];
 
     const issueKeys = issues.map((i) => i.key);
 
@@ -153,6 +151,21 @@ export class LeadTimeService {
       }
     }
 
+    leadTimeDays.sort((a, b) => a - b);
+    return leadTimeDays;
+  }
+
+  async calculate(
+    boardId: string,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<LeadTimeResult> {
+    const leadTimeDays = await this.getLeadTimeObservations(
+      boardId,
+      startDate,
+      endDate,
+    );
+
     if (leadTimeDays.length === 0) {
       return {
         boardId,
@@ -163,7 +176,7 @@ export class LeadTimeService {
       };
     }
 
-    leadTimeDays.sort((a, b) => a - b);
+    // Array is already sorted by getLeadTimeObservations
     const median = percentile(leadTimeDays, 50);
     const p95 = percentile(leadTimeDays, 95);
 
@@ -175,17 +188,4 @@ export class LeadTimeService {
       sampleSize: leadTimeDays.length,
     };
   }
-}
-
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  const index = (p / 100) * (sorted.length - 1);
-  const lower = Math.floor(index);
-  const upper = Math.ceil(index);
-  if (lower === upper) return sorted[lower];
-  return sorted[lower] + (index - lower) * (sorted[upper] - sorted[lower]);
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

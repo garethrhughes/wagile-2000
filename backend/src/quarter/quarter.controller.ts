@@ -2,15 +2,11 @@ import {
   Controller,
   Get,
   Param,
-  UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiSecurity, ApiTags } from '@nestjs/swagger';
-import { ApiKeyAuthGuard } from '../auth/api-key-auth.guard.js';
+import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { QuarterDetailService, type QuarterDetailResponse } from './quarter-detail.service.js';
 
 @ApiTags('quarters')
-@ApiSecurity('api-key')
-@UseGuards(ApiKeyAuthGuard)
 @Controller('api/quarters')
 export class QuarterController {
   constructor(private readonly quarterDetailService: QuarterDetailService) {}

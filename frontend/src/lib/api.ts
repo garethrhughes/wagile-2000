@@ -26,6 +26,8 @@ export interface BoardConfig {
   recoveryStatusNames: string[];
   incidentLabels: string[];
   backlogStatusIds: string[];
+  dataStartDate: string | null;
+  inProgressStatusNames: string[];
 }
 
 export interface SprintAccuracy {
@@ -131,38 +133,26 @@ export class ApiError extends Error {
 
 // ---- Core fetch helper ---------------------------------------------------
 
-function getApiKey(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('dashboard_api_key');
-}
-
 export async function apiFetch<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
-  const apiKey = getApiKey();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(apiKey ? { 'x-api-key': apiKey } : {}),
     ...(options?.headers as Record<string, string> | undefined),
-  };
+  }
 
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
     headers,
-  });
+  })
 
   if (!res.ok) {
-    // On 401, clear the stored key so the AuthGate shows the login form
-    if (res.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('dashboard_api_key');
-      window.location.reload();
-    }
-    const body = await res.text().catch(() => '');
-    throw new ApiError(res.status, `API error ${res.status}: ${body}`);
+    const body = await res.text().catch(() => '')
+    throw new ApiError(res.status, `API error ${res.status}: ${body}`)
   }
 
-  return res.json() as Promise<T>;
+  return res.json() as Promise<T>
 }
 
 // ---- Query-string helper -------------------------------------------------
@@ -544,5 +534,201 @@ export function getQuarterDetail(
 ): Promise<QuarterDetailResponse> {
   return apiFetch<QuarterDetailResponse>(
     `/api/quarters/${encodeURIComponent(boardId)}/${encodeURIComponent(quarter)}/detail`,
+  )
+}
+
+// ---- DORA Aggregate & Trend types and endpoints --------------------------
+
+export interface OrgDeploymentFrequencyResult {
+  totalDeployments: number
+  deploymentsPerDay: number
+  band: DoraBand
+  periodDays: number
+  contributingBoards: number
+}
+
+export interface OrgLeadTimeResult {
+  medianDays: number
+  p95Days: number
+  band: DoraBand
+  sampleSize: number
+  contributingBoards: number
+}
+
+export interface OrgCfrResult {
+  totalDeployments: number
+  failureCount: number
+  changeFailureRate: number
+  band: DoraBand
+  contributingBoards: number
+  anyBoardUsingDefaultConfig: boolean
+  boardsUsingDefaultConfig: string[]
+}
+
+export interface OrgMttrResult {
+  medianHours: number
+  band: DoraBand
+  incidentCount: number
+  contributingBoards: number
+}
+
+/** Extended board breakdown that includes boardType (RC-4) */
+export interface DoraMetricsBoardBreakdown extends DoraMetricsBoard {
+  boardType: 'scrum' | 'kanban'
+}
+
+export interface OrgDoraResult {
+  period: { start: string; end: string }
+  orgDeploymentFrequency: OrgDeploymentFrequencyResult
+  orgLeadTime: OrgLeadTimeResult
+  orgChangeFailureRate: OrgCfrResult
+  orgMttr: OrgMttrResult
+  boardBreakdowns: DoraMetricsBoardBreakdown[]
+  anyBoardUsingDefaultConfig: boolean
+  boardsUsingDefaultConfig: string[]
+}
+
+export interface TrendPoint {
+  label: string
+  start: string
+  end: string
+  deploymentsPerDay: number
+  medianLeadTimeDays: number
+  changeFailureRate: number
+  mttrMedianHours: number
+  orgBands: {
+    deploymentFrequency: DoraBand
+    leadTime: DoraBand
+    changeFailureRate: DoraBand
+    mttr: DoraBand
+  }
+}
+
+export type TrendResponse = TrendPoint[]
+
+export interface DoraAggregateParams {
+  /** Comma-separated board IDs (same semantics as MetricsQueryDto.boardId) */
+  boardId?: string
+  quarter?: string
+  sprintId?: string
+  period?: string
+}
+
+export interface DoraTrendParams {
+  /** Comma-separated board IDs (same semantics as MetricsQueryDto.boardId) */
+  boardId?: string
+  mode?: 'quarters' | 'sprints'
+  limit?: number
+}
+
+export function getDoraAggregate(params: DoraAggregateParams): Promise<OrgDoraResult> {
+  return apiFetch(
+    `/api/metrics/dora/aggregate${toQueryString({
+      boardId: params.boardId,
+      quarter: params.quarter,
+      sprintId: params.sprintId,
+      period: params.period,
+    })}`,
+  )
+}
+
+export function getDoraTrend(params: DoraTrendParams): Promise<TrendResponse> {
+  return apiFetch(
+    `/api/metrics/dora/trend${toQueryString({
+      boardId: params.boardId,
+      mode: params.mode,
+      limit: params.limit !== undefined ? String(params.limit) : undefined,
+    })}`,
+  )
+}
+
+// ---- Cycle Time types ----------------------------------------------------
+
+export type CycleTimeBand = 'excellent' | 'good' | 'fair' | 'poor'
+
+/**
+ * Per-issue cycle time observation.
+ * Note: leadTimeDays and queueTimeDays are excluded from v1 (Rec A).
+ */
+export interface CycleTimeObservation {
+  issueKey: string
+  issueType: string
+  summary: string
+  cycleTimeDays: number
+  completedAt: string
+  startedAt: string
+  periodKey: string
+  jiraUrl: string
+}
+
+/**
+ * Issue 1: anomalyCount is present in this definition as required.
+ */
+export interface CycleTimeResult {
+  boardId: string
+  p50Days: number
+  p75Days: number
+  p85Days: number
+  p95Days: number
+  count: number
+  anomalyCount: number
+  observations: CycleTimeObservation[]
+  band: CycleTimeBand
+}
+
+export type CycleTimeResponse = CycleTimeResult[]
+
+export interface CycleTimeTrendPoint {
+  label: string
+  start: string
+  end: string
+  medianCycleTimeDays: number
+  p85CycleTimeDays: number
+  sampleSize: number
+  band: CycleTimeBand
+}
+
+export type CycleTimeTrendResponse = CycleTimeTrendPoint[]
+
+export interface CycleTimeQueryParams {
+  boardId: string
+  period?: string
+  sprintId?: string
+  quarter?: string
+  issueType?: string
+}
+
+export interface CycleTimeTrendParams {
+  boardId?: string
+  mode?: 'quarters' | 'sprints'
+  limit?: number
+  issueType?: string
+}
+
+// ---- Cycle Time endpoint wrappers ----------------------------------------
+
+export function getCycleTime(
+  params: CycleTimeQueryParams,
+): Promise<CycleTimeResponse> {
+  return apiFetch(
+    `/api/cycle-time/${encodeURIComponent(params.boardId)}${toQueryString({
+      period: params.period,
+      sprintId: params.sprintId,
+      quarter: params.quarter,
+      issueType: params.issueType,
+    })}`,
+  )
+}
+
+export function getCycleTimeTrend(
+  params: CycleTimeTrendParams,
+): Promise<CycleTimeTrendResponse> {
+  return apiFetch(
+    `/api/cycle-time/trend${toQueryString({
+      boardId: params.boardId,
+      mode: params.mode,
+      limit: params.limit !== undefined ? String(params.limit) : undefined,
+      issueType: params.issueType,
+    })}`,
   )
 }

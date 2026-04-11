@@ -17,6 +17,7 @@ import {
   BoardConfig,
 } from '../database/entities/index.js';
 import { SyncService } from '../sync/sync.service.js';
+import { isWorkItem } from '../metrics/issue-type-filters.js';
 
 export interface RoadmapSprintAccuracy {
   sprintId: string;
@@ -166,7 +167,7 @@ export class RoadmapService {
 
     // Load all Kanban issues for this board, excluding Epics and Sub-tasks
     const allIssues = (await this.issueRepo.find({ where: { boardId } })).filter(
-      (i) => i.issueType !== 'Epic' && i.issueType !== 'Sub-task',
+      (i) => isWorkItem(i.issueType),
     );
 
     if (allIssues.length === 0) {
@@ -220,9 +221,23 @@ export class RoadmapService {
       return [];
     }
 
+    // Apply dataStartDate lower bound filter if configured
+    const dataStartDate = boardConfig?.dataStartDate ?? null;
+    const startBound = dataStartDate ? new Date(dataStartDate) : null;
+    const boundedIssues = startBound
+      ? onBoardIssues.filter((issue) => {
+          const entryDate = boardEntryDate.get(issue.key) ?? issue.createdAt;
+          return entryDate >= startBound;
+        })
+      : onBoardIssues;
+
+    if (boundedIssues.length === 0) {
+      return [];
+    }
+
     // Group issues by the quarter of their board-entry date (fall back to createdAt)
     const quarterMap = new Map<string, JiraIssue[]>();
-    for (const issue of onBoardIssues) {
+    for (const issue of boundedIssues) {
       const entryDate = boardEntryDate.get(issue.key) ?? issue.createdAt;
       const key = this.issueToQuarterKey(entryDate);
       const list = quarterMap.get(key) ?? [];
@@ -363,7 +378,7 @@ export class RoadmapService {
 
     // Load all Kanban issues for this board, excluding Epics and Sub-tasks
     const allIssues = (await this.issueRepo.find({ where: { boardId } })).filter(
-      (i) => i.issueType !== 'Epic' && i.issueType !== 'Sub-task',
+      (i) => isWorkItem(i.issueType),
     );
 
     if (allIssues.length === 0) {
@@ -417,9 +432,23 @@ export class RoadmapService {
       return [];
     }
 
+    // Apply dataStartDate lower bound filter if configured
+    const dataStartDateWeekly = boardConfig?.dataStartDate ?? null;
+    const startBoundWeekly = dataStartDateWeekly ? new Date(dataStartDateWeekly) : null;
+    const boundedIssuesWeekly = startBoundWeekly
+      ? onBoardIssues.filter((issue) => {
+          const entryDate = boardEntryDate.get(issue.key) ?? issue.createdAt;
+          return entryDate >= startBoundWeekly;
+        })
+      : onBoardIssues;
+
+    if (boundedIssuesWeekly.length === 0) {
+      return [];
+    }
+
     // Group issues by the week of their board-entry date (fall back to createdAt)
     const weekMap = new Map<string, JiraIssue[]>();
-    for (const issue of onBoardIssues) {
+    for (const issue of boundedIssuesWeekly) {
       const entryDate = boardEntryDate.get(issue.key) ?? issue.createdAt;
       const key = this.dateToWeekKey(entryDate);
       const list = weekMap.get(key) ?? [];
@@ -488,7 +517,7 @@ export class RoadmapService {
     doneStatusNames: string[],
   ): Promise<RoadmapSprintAccuracy> {
     const filteredIssues = sprintIssues.filter(
-      (i) => i.issueType !== 'Epic' && i.issueType !== 'Sub-task',
+      (i) => isWorkItem(i.issueType),
     );
 
     if (filteredIssues.length === 0) {

@@ -13,6 +13,7 @@ import {
   JpdIdea,
   RoadmapConfig,
 } from '../database/entities/index.js';
+import { isWorkItem } from '../metrics/issue-type-filters.js';
 
 // ---------------------------------------------------------------------------
 // Response interfaces (exported for use by the controller and frontend types)
@@ -147,7 +148,8 @@ export class QuarterDetailService {
     // -----------------------------------------------------------------------
     // Step 3 — Load all issues for board
     // -----------------------------------------------------------------------
-    const issues = await this.issueRepo.find({ where: { boardId } });
+    const issues = (await this.issueRepo.find({ where: { boardId } }))
+      .filter((i) => isWorkItem(i.issueType));
 
     if (issues.length === 0) {
       return this.buildEmptyResponse(boardId, quarter, quarterStart, quarterEnd, boardType, doneStatuses);
@@ -216,10 +218,20 @@ export class QuarterDetailService {
         })
       : issues;
 
+    // Apply dataStartDate lower bound filter for Kanban boards (before the quarter window filter)
+    const dataStartDate = boardConfig?.dataStartDate ?? null;
+    const startBound = boardType === 'kanban' && dataStartDate ? new Date(dataStartDate) : null;
+    const startBoundedIssues = startBound
+      ? filteredIssues.filter((issue) => {
+          const entryDate = boardEntryDateByKey.get(issue.key);
+          return entryDate !== undefined && entryDate >= startBound;
+        })
+      : filteredIssues;
+
     // -----------------------------------------------------------------------
     // Step 6 — Filter issues to those whose boardEntryDate falls within the quarter
     // -----------------------------------------------------------------------
-    const quarterIssues = filteredIssues.filter((issue) => {
+    const quarterIssues = startBoundedIssues.filter((issue) => {
       const entryDate = boardEntryDateByKey.get(issue.key);
       if (!entryDate) return false;
       return entryDate >= quarterStart && entryDate <= quarterEnd;

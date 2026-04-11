@@ -13,6 +13,7 @@ import {
   JpdIdea,
   RoadmapConfig,
 } from '../database/entities/index.js';
+import { isWorkItem } from '../metrics/issue-type-filters.js';
 
 // ---------------------------------------------------------------------------
 // Response interfaces (exported for use by the controller and frontend types)
@@ -155,7 +156,8 @@ export class WeekDetailService {
     // -----------------------------------------------------------------------
     // Step 3 — Load all issues for board
     // -----------------------------------------------------------------------
-    const issues = await this.issueRepo.find({ where: { boardId } });
+    const issues = (await this.issueRepo.find({ where: { boardId } }))
+      .filter((i) => isWorkItem(i.issueType));
 
     if (issues.length === 0) {
       return this.buildEmptyResponse(boardId, week, weekStart, weekEnd, boardType, doneStatuses);
@@ -212,10 +214,20 @@ export class WeekDetailService {
       return issueKeysWithStatusChangelog.has(issue.key);
     });
 
+    // Apply dataStartDate lower bound filter (before the week window filter)
+    const dataStartDate = boardConfig?.dataStartDate ?? null;
+    const startBound = dataStartDate ? new Date(dataStartDate) : null;
+    const startBoundedIssues = startBound
+      ? filteredIssues.filter((issue) => {
+          const entryDate = boardEntryDateByKey.get(issue.key);
+          return entryDate !== undefined && entryDate >= startBound;
+        })
+      : filteredIssues;
+
     // -----------------------------------------------------------------------
     // Step 6 — Filter issues to those whose boardEntryDate falls within the week
     // -----------------------------------------------------------------------
-    const weekIssues = filteredIssues.filter((issue) => {
+    const weekIssues = startBoundedIssues.filter((issue) => {
       const entryDate = boardEntryDateByKey.get(issue.key);
       if (!entryDate) return false;
       return entryDate >= weekStart && entryDate <= weekEnd;

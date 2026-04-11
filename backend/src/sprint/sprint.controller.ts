@@ -2,15 +2,11 @@ import {
   Controller,
   Get,
   Param,
-  UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
-import { ApiKeyAuthGuard } from '../auth/api-key-auth.guard.js';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SprintDetailService, type SprintDetailResponse } from './sprint-detail.service.js';
 
 @ApiTags('sprints')
-@ApiSecurity('api-key')
-@UseGuards(ApiKeyAuthGuard)
 @Controller('api/sprints')
 export class SprintController {
   constructor(private readonly sprintDetailService: SprintDetailService) {}

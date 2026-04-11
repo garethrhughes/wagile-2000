@@ -3,16 +3,12 @@ import {
   Get,
   Param,
   Query,
-  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiSecurity } from '@nestjs/swagger';
-import { ApiKeyAuthGuard } from '../auth/api-key-auth.guard.js';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { PlanningService } from './planning.service.js';
 import { PlanningQueryDto } from './dto/planning-query.dto.js';
 
 @ApiTags('planning')
-@ApiSecurity('api-key')
-@UseGuards(ApiKeyAuthGuard)
 @Controller('api/planning')
 export class PlanningController {
   constructor(private readonly planningService: PlanningService) {}

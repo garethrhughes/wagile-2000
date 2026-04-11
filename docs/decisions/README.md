@@ -15,7 +15,7 @@ a new ADR is created for the replacement decision.
 | [0001](0001-use-jira-fix-versions-as-deployment-signal.md) | Use Jira fix versions as primary deployment signal with done-status fallback | Accepted | 2026-04-10 |
 | [0002](0002-cache-jira-data-in-postgres.md) | Cache Jira data in Postgres rather than querying live per request | Accepted | 2026-04-10 |
 | [0003](0003-per-board-configurable-rules-for-cfr-and-mttr.md) | Per-board configurable rules for CFR and MTTR stored in BoardConfig entity | Accepted | 2026-04-10 |
-| [0004](0004-single-user-api-key-auth.md) | Single-user API key auth via Passport HeaderAPIKeyStrategy | Accepted | 2026-04-10 |
+| [0004](0004-single-user-api-key-auth.md) | Single-user API key auth via Passport HeaderAPIKeyStrategy | Superseded by [0020](0020-no-application-level-authentication.md) | 2026-04-10 |
 | [0005](0005-kanban-boards-excluded-from-planning-accuracy.md) | Kanban boards excluded from planning accuracy report | Accepted | 2026-04-10 |
 | [0006](0006-sprint-membership-reconstructed-from-changelog.md) | Sprint membership at start date reconstructed from Jira changelog | Accepted | 2026-04-10 |
 | [0007](0007-monorepo-backend-frontend-directories.md) | Monorepo with backend/ and frontend/ directories (not apps/api + apps/web) | Accepted | 2026-04-10 |
@@ -29,3 +29,6 @@ a new ADR is created for the replacement decision.
 | [0015](0015-board-config-as-metric-filter-composition-point.md) | BoardConfig as the sole composition point for metric filter rules | Proposed | 2026-04-10 |
 | [0016](0016-quarter-detail-view.md) | Calendar-period drill-down as a first-class view pattern | Proposed | 2026-04-10 |
 | [0017](0017-kanban-backlog-inflation-fix.md) | Kanban backlog inflation fix: statusId storage, per-board backlog config, and two-tier exclusion logic | Accepted | 2026-04-11 |
+| [0018](0018-exclude-epics-and-subtasks-from-metrics.md) | Exclude Epics and Sub-tasks from all metric calculations via shared `isWorkItem()` utility | Accepted | 2026-04-12 |
+| [0019](0019-broaden-in-progress-status-names-default.md) | Broaden `inProgressStatusNames` default for cycle-time start detection | Accepted | 2026-04-12 |
+| [0020](0020-no-application-level-authentication.md) | No application-level authentication; CORS as sole access control | Accepted | 2026-04-12 |

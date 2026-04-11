@@ -7,7 +7,7 @@ import {
   BoardConfig,
 } from '../database/entities/index.js';
 
-function mockRepo<T>(): jest.Mocked<Repository<T>> {
+function mockRepo<T extends object>(): jest.Mocked<Repository<T>> {
   return {
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(null),

@@ -1,8 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Save, Eye, EyeOff, Loader2, CheckCircle, XCircle, Plus, Trash2, RefreshCw } from 'lucide-react';
-import { useAuthStore } from '@/store/auth-store';
+import { Save, Loader2, CheckCircle, XCircle, Plus, Trash2, RefreshCw } from 'lucide-react';
 import {
   getBoards,
   getBoardConfig,
@@ -80,12 +79,7 @@ function CsvField({ label, value, onChange }: CsvFieldProps) {
 // ---------------------------------------------------------------------------
 
 export default function SettingsPage() {
-  const { apiKey, setApiKey, clearApiKey } = useAuthStore();
   const { toasts, show } = useToast();
-
-  // API Key management
-  const [showKey, setShowKey] = useState(false);
-  const [newKey, setNewKey] = useState('');
 
   // Board config
   const [boardList, setBoardList] = useState<string[]>([]);
@@ -166,10 +160,6 @@ export default function SettingsPage() {
     setConfig({ ...config, [key]: value });
   }
 
-  const maskedKey = apiKey
-    ? `${'•'.repeat(Math.max(0, apiKey.length - 4))}${apiKey.slice(-4)}`
-    : '';
-
   return (
     <div className="space-y-8">
       {/* Toast notifications */}
@@ -197,73 +187,9 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-bold">Settings</h1>
         <p className="mt-1 text-sm text-muted">
-          Manage API key and board configurations
+          Manage board configurations
         </p>
       </div>
-
-      {/* API Key section */}
-      <section className="rounded-xl border border-border bg-card p-6">
-        <h2 className="mb-4 text-lg font-semibold">API Key</h2>
-
-        {apiKey ? (
-          <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <code className="rounded bg-gray-100 px-3 py-1.5 text-sm font-mono">
-                {showKey ? apiKey : maskedKey}
-              </code>
-              <button
-                type="button"
-                onClick={() => setShowKey(!showKey)}
-                className="text-muted hover:text-foreground"
-                aria-label={showKey ? 'Hide API key' : 'Show API key'}
-              >
-                {showKey ? (
-                  <EyeOff className="h-4 w-4" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
-              </button>
-            </div>
-
-            <div className="flex gap-3">
-              <div className="flex flex-1 gap-2">
-                <input
-                  type="password"
-                  value={newKey}
-                  onChange={(e) => setNewKey(e.target.value)}
-                  placeholder="Enter new API key"
-                  className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (newKey.trim()) {
-                      setApiKey(newKey.trim());
-                      setNewKey('');
-                      show('success', 'API key updated');
-                    }
-                  }}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                >
-                  Update
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  clearApiKey();
-                  show('success', 'API key removed');
-                }}
-                className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-muted">No API key set.</p>
-        )}
-      </section>
 
       {/* Board config section */}
       <section className="rounded-xl border border-border bg-card p-6">
@@ -309,10 +235,31 @@ export default function SettingsPage() {
                   className="w-full rounded-lg border border-border bg-gray-50 px-3 py-2 text-sm text-muted"
                 />
               </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium">
+                  Data Start Date
+                </label>
+                <input
+                  type="date"
+                  value={config.dataStartDate ?? ''}
+                  onChange={(e) =>
+                    updateField('dataStartDate', e.target.value || null)
+                  }
+                  className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm"
+                />
+                <p className="mt-1 text-xs text-muted">
+                  Issues with a board-entry date before this date are excluded from all Kanban metrics. Leave blank for no lower bound.
+                </p>
+              </div>
               <CsvField
                 label="Done Status Names"
                 value={config.doneStatusNames}
                 onChange={(v) => updateField('doneStatusNames', v)}
+              />
+              <CsvField
+                label="In-Progress Status Names"
+                value={config.inProgressStatusNames}
+                onChange={(v) => updateField('inProgressStatusNames', v)}
               />
               <CsvField
                 label="Failure Issue Types"

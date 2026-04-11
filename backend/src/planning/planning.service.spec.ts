@@ -8,7 +8,7 @@ import {
   BoardConfig,
 } from '../database/entities/index.js';
 
-function mockRepo<T>(): jest.Mocked<Repository<T>> {
+function mockRepo<T extends object>(): jest.Mocked<Repository<T>> {
   return {
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(null),
@@ -47,7 +47,9 @@ describe('PlanningService', () => {
       boardConfigRepo.findOne.mockResolvedValue({
         boardId: 'PLAT',
         boardType: 'kanban',
-      } as BoardConfig);
+        inProgressStatusNames: ['In Progress'],
+        dataStartDate: null,
+      } as unknown as BoardConfig);
 
       await expect(service.getAccuracy('PLAT')).rejects.toThrow(
         BadRequestException,
@@ -83,7 +85,7 @@ describe('PlanningService', () => {
         { key: 'ACC-1', sprintId: 'sprint-1', status: 'Done', boardId: 'ACC', createdAt: new Date('2025-01-01') },
         { key: 'ACC-2', sprintId: 'sprint-1', status: 'Done', boardId: 'ACC', createdAt: new Date('2025-01-01') },
         { key: 'ACC-3', sprintId: 'sprint-1', status: 'In Progress', boardId: 'ACC', createdAt: new Date('2025-01-01') },
-      ] as JiraIssue[]);
+      ] as unknown as JiraIssue[]);
 
       let qbCallCount = 0;
       changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
@@ -171,7 +173,7 @@ describe('PlanningService', () => {
       issueRepo.find.mockResolvedValue([
         { key: 'ACC-10', sprintId: 'sprint-2', status: 'Done', boardId: 'ACC', createdAt: new Date('2025-01-01') },
         { key: 'ACC-11', sprintId: 'sprint-2', status: 'Done', boardId: 'ACC', createdAt: new Date('2025-01-01') },
-      ] as JiraIssue[]);
+      ] as unknown as JiraIssue[]);
 
       let qbCallCount = 0;
       changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {

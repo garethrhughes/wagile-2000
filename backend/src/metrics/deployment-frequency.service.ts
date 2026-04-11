@@ -11,6 +11,7 @@ import {
   classifyDeploymentFrequency,
   type DoraBand,
 } from './dora-bands.js';
+import { isWorkItem } from './issue-type-filters.js';
 
 export interface DeploymentFrequencyResult {
   boardId: string;
@@ -60,12 +61,12 @@ export class DeploymentFrequencyService {
     let versionDeployments = 0;
 
     if (versionNames.length > 0) {
-      const issues = await this.issueRepo.find({
+      const issues = (await this.issueRepo.find({
         where: {
           boardId,
           fixVersion: In(versionNames),
         },
-      });
+      })).filter((i) => isWorkItem(i.issueType));
       versionDeployments = issues.length;
     }
 
@@ -100,10 +101,10 @@ export class DeploymentFrequencyService {
     endDate: Date,
   ): Promise<number> {
     // Get all issues for this board
-    const issues = await this.issueRepo.find({
+    const issues = (await this.issueRepo.find({
       where: { boardId },
-      select: ['key'],
-    });
+      select: ['key', 'issueType'],
+    })).filter((i) => isWorkItem(i.issueType));
 
     if (issues.length === 0) return 0;
 

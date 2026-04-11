@@ -1,11 +1,8 @@
-import { Controller, Post, Get, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiSecurity } from '@nestjs/swagger';
-import { ApiKeyAuthGuard } from '../auth/api-key-auth.guard.js';
+import { Controller, Post, Get } from '@nestjs/common';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { SyncService } from './sync.service.js';
 
 @ApiTags('sync')
-@ApiSecurity('api-key')
-@UseGuards(ApiKeyAuthGuard)
 @Controller('api/sync')
 export class SyncController {
   constructor(private readonly syncService: SyncService) {}

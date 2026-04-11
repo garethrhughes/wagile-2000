@@ -9,6 +9,7 @@ import {
   JiraIssueLink,
 } from '../database/entities/index.js';
 import { classifyChangeFailureRate, type DoraBand } from './dora-bands.js';
+import { isWorkItem } from './issue-type-filters.js';
 
 export interface CfrResult {
   boardId: string;
@@ -64,9 +65,9 @@ export class CfrService {
     ];
 
     // Count total deployments (issues that reached done in the period)
-    const allIssues = await this.issueRepo.find({
+    const allIssues = (await this.issueRepo.find({
       where: { boardId },
-    });
+    })).filter((i) => isWorkItem(i.issueType));
 
     if (allIssues.length === 0) {
       return {
@@ -109,9 +110,8 @@ export class CfrService {
         ? (
             await this.issueRepo.find({
               where: { boardId, fixVersion: In(versionNames) },
-              select: ['key'],
             })
-          ).map((i) => i.key)
+          ).filter((i) => isWorkItem(i.issueType)).map((i) => i.key)
         : [];
 
     // Union of deployed issue keys

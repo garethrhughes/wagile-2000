@@ -11,6 +11,7 @@ import {
   JiraChangelog,
   BoardConfig,
 } from '../database/entities/index.js';
+import { isWorkItem } from '../metrics/issue-type-filters.js';
 
 export interface SprintAccuracy {
   sprintId: string;
@@ -138,9 +139,9 @@ export class PlanningService {
     // Get ALL board issues so we can reconstruct sprint membership from changelogs.
     // We can't rely on the sprintId column alone because upsert during sync
     // overwrites it with the last-synced sprint.
-    const boardIssues = await this.issueRepo.find({
+    const boardIssues = (await this.issueRepo.find({
       where: { boardId: sprint.boardId },
-    });
+    })).filter((i) => isWorkItem(i.issueType));
 
     if (boardIssues.length === 0) {
       return this.emptyAccuracy(sprint);
@@ -468,7 +469,7 @@ export class PlanningService {
     // Load all issues for this board, excluding Epics and Sub-tasks
     const allIssues = (
       await this.issueRepo.find({ where: { boardId } })
-    ).filter((i) => i.issueType !== 'Epic' && i.issueType !== 'Sub-task');
+    ).filter((i) => isWorkItem(i.issueType));
 
     if (allIssues.length === 0) {
       return [];
@@ -530,9 +531,23 @@ export class PlanningService {
       return [];
     }
 
+    // Apply dataStartDate lower bound filter if configured
+    const dataStartDate = config.dataStartDate ?? null;
+    const startBound = dataStartDate ? new Date(dataStartDate) : null;
+    const boundedIssues = startBound
+      ? onBoardIssues.filter((issue) => {
+          const entryDate = boardEntryDate.get(issue.key) ?? issue.createdAt;
+          return entryDate >= startBound;
+        })
+      : onBoardIssues;
+
+    if (boundedIssues.length === 0) {
+      return [];
+    }
+
     // Bucket issues by the quarter of their board-entry date (fall back to createdAt)
     const quarterMap = new Map<string, typeof onBoardIssues>();
-    for (const issue of onBoardIssues) {
+    for (const issue of boundedIssues) {
       const entryDate = boardEntryDate.get(issue.key) ?? issue.createdAt;
       const key = this.dateToQuarterKey(entryDate);
       const list = quarterMap.get(key) ?? [];
@@ -615,7 +630,7 @@ export class PlanningService {
     // Load all issues for this board, excluding Epics and Sub-tasks
     const allIssues = (
       await this.issueRepo.find({ where: { boardId } })
-    ).filter((i) => i.issueType !== 'Epic' && i.issueType !== 'Sub-task');
+    ).filter((i) => isWorkItem(i.issueType));
 
     if (allIssues.length === 0) {
       return [];
@@ -670,9 +685,23 @@ export class PlanningService {
       return [];
     }
 
+    // Apply dataStartDate lower bound filter if configured
+    const dataStartDateWeeks = config.dataStartDate ?? null;
+    const startBoundWeeks = dataStartDateWeeks ? new Date(dataStartDateWeeks) : null;
+    const boundedIssuesWeeks = startBoundWeeks
+      ? onBoardIssues.filter((issue) => {
+          const entryDate = boardEntryDate.get(issue.key) ?? issue.createdAt;
+          return entryDate >= startBoundWeeks;
+        })
+      : onBoardIssues;
+
+    if (boundedIssuesWeeks.length === 0) {
+      return [];
+    }
+
     // Bucket issues by the week of their board-entry date (fall back to createdAt)
     const weekMap = new Map<string, typeof onBoardIssues>();
-    for (const issue of onBoardIssues) {
+    for (const issue of boundedIssuesWeeks) {
       const entryDate = boardEntryDate.get(issue.key) ?? issue.createdAt;
       const key = this.dateToWeekKey(entryDate);
       const list = weekMap.get(key) ?? [];

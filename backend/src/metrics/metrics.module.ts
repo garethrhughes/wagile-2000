@@ -6,6 +6,8 @@ import { DeploymentFrequencyService } from './deployment-frequency.service.js';
 import { LeadTimeService } from './lead-time.service.js';
 import { CfrService } from './cfr.service.js';
 import { MttrService } from './mttr.service.js';
+import { CycleTimeService } from './cycle-time.service.js';
+import { CycleTimeController } from './cycle-time.controller.js';
 import {
   JiraIssue,
   JiraChangelog,
@@ -26,13 +28,14 @@ import {
       JiraIssueLink,
     ]),
   ],
-  controllers: [MetricsController],
+  controllers: [MetricsController, CycleTimeController],
   providers: [
     MetricsService,
     DeploymentFrequencyService,
     LeadTimeService,
     CfrService,
     MttrService,
+    CycleTimeService,
   ],
   exports: [MetricsService],
 })

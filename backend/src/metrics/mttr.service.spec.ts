@@ -6,7 +6,7 @@ import {
   BoardConfig,
 } from '../database/entities/index.js';
 
-function mockRepo<T>(): jest.Mocked<Repository<T>> {
+function mockRepo<T extends object>(): jest.Mocked<Repository<T>> {
   return {
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(null),
@@ -56,7 +56,9 @@ describe('MttrService', () => {
       incidentIssueTypes: ['Bug', 'Incident'],
       recoveryStatusNames: ['Done', 'Resolved'],
       incidentLabels: [],
-    } as BoardConfig);
+      inProgressStatusNames: ['In Progress'],
+      dataStartDate: null,
+    } as unknown as BoardConfig);
 
     // Two incidents: Bug created at different times
     issueRepo.find.mockResolvedValue([
@@ -81,7 +83,7 @@ describe('MttrService', () => {
         labels: [],
         createdAt: new Date('2025-01-01T00:00:00Z'),
       },
-    ] as JiraIssue[]);
+    ] as unknown as JiraIssue[]);
 
     // ACC-1 recovered in 12 hours, ACC-2 recovered in 48 hours
     const qb = {
@@ -123,7 +125,9 @@ describe('MttrService', () => {
       incidentIssueTypes: [],
       recoveryStatusNames: ['Done'],
       incidentLabels: ['production-incident'],
-    } as BoardConfig);
+      inProgressStatusNames: ['In Progress'],
+      dataStartDate: null,
+    } as unknown as BoardConfig);
 
     issueRepo.find.mockResolvedValue([
       {
@@ -140,7 +144,7 @@ describe('MttrService', () => {
         labels: [],
         createdAt: new Date('2025-01-15T00:00:00Z'),
       },
-    ] as JiraIssue[]);
+    ] as unknown as JiraIssue[]);
 
     const qb = {
       where: jest.fn().mockReturnThis(),

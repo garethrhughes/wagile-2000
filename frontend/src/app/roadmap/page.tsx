@@ -221,7 +221,7 @@ function TrendChart({ title, data, color, unit = '' }: TrendChartProps) {
 export default function RoadmapPage() {
   const [selectedBoard, setSelectedBoard] = useState<string>('ACC');
   const [periodType, setPeriodType] = useState<'sprint' | 'quarter'>('sprint');
-  const [kanbanPeriod, setKanbanPeriod] = useState<'quarter' | 'week'>('quarter');
+  const [kanbanPeriod, setKanbanPeriod] = useState<'quarter' | 'week'>('week');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rawData, setRawData] = useState<RoadmapSprintAccuracy[]>([]);
@@ -605,25 +605,25 @@ export default function RoadmapPage() {
                 <div className="inline-flex rounded-lg border border-border">
                   <button
                     type="button"
-                    onClick={() => setKanbanPeriod('quarter')}
-                    className={`rounded-l-lg px-4 py-2 text-sm font-medium transition-colors ${
-                      kanbanPeriod === 'quarter'
-                        ? 'bg-blue-50 text-blue-700'
-                        : 'text-muted hover:bg-gray-50'
-                    }`}
-                  >
-                    Quarter
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setKanbanPeriod('week')}
-                    className={`rounded-r-lg px-4 py-2 text-sm font-medium transition-colors ${
+                    className={`rounded-l-lg px-4 py-2 text-sm font-medium transition-colors ${
                       kanbanPeriod === 'week'
                         ? 'bg-blue-50 text-blue-700'
                         : 'text-muted hover:bg-gray-50'
                     }`}
                   >
                     Week
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setKanbanPeriod('quarter')}
+                    className={`rounded-r-lg px-4 py-2 text-sm font-medium transition-colors ${
+                      kanbanPeriod === 'quarter'
+                        ? 'bg-blue-50 text-blue-700'
+                        : 'text-muted hover:bg-gray-50'
+                    }`}
+                  >
+                    Quarter
                   </button>
                 </div>
               ) : (

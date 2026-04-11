@@ -7,6 +7,8 @@ import {
   BoardConfig,
 } from '../database/entities/index.js';
 import { classifyMTTR, type DoraBand } from './dora-bands.js';
+import { percentile, round2 } from './statistics.js';
+import { isWorkItem } from './issue-type-filters.js';
 
 export interface MttrResult {
   boardId: string;
@@ -26,11 +28,15 @@ export class MttrService {
     private readonly boardConfigRepo: Repository<BoardConfig>,
   ) {}
 
-  async calculate(
+  /**
+   * Returns the raw sorted recovery-hours observations for a board/period.
+   * Used by MetricsService.getDoraAggregate() for pooled-median computation.
+   */
+  async getMttrObservations(
     boardId: string,
     startDate: Date,
     endDate: Date,
-  ): Promise<MttrResult> {
+  ): Promise<number[]> {
     const config = await this.boardConfigRepo.findOne({
       where: { boardId },
     });
@@ -46,9 +52,9 @@ export class MttrService {
     const incidentPriorities = config?.incidentPriorities ?? ['Critical'];
 
     // Get incident issues for this board
-    const allIssues = await this.issueRepo.find({
+    const allIssues = (await this.issueRepo.find({
       where: { boardId },
-    });
+    })).filter((i) => isWorkItem(i.issueType));
 
     const incidentIssues = allIssues.filter((issue) => {
       const isIncidentType = incidentIssueTypes.includes(issue.issueType);
@@ -69,14 +75,7 @@ export class MttrService {
           )
         : incidentIssues;
 
-    if (priorityFilteredIssues.length === 0) {
-      return {
-        boardId,
-        medianHours: 0,
-        band: classifyMTTR(0),
-        incidentCount: 0,
-      };
-    }
+    if (priorityFilteredIssues.length === 0) return [];
 
     const incidentKeys = priorityFilteredIssues.map((i) => i.key);
 
@@ -115,10 +114,7 @@ export class MttrService {
 
     // Calculate MTTR for each incident.
     // Start time = first "In Progress" transition (when work began), falling
-    // back to issue creation if no such transition exists. This avoids
-    // undercounting when tickets are created hours after the incident starts
-    // being actively worked — measuring ticket lifecycle rather than wall-clock
-    // discovery time.
+    // back to issue creation if no such transition exists.
     const issueMap = new Map(priorityFilteredIssues.map((i) => [i.key, i]));
     const recoveryHours: number[] = [];
 
@@ -141,6 +137,21 @@ export class MttrService {
       }
     }
 
+    recoveryHours.sort((a, b) => a - b);
+    return recoveryHours;
+  }
+
+  async calculate(
+    boardId: string,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<MttrResult> {
+    const recoveryHours = await this.getMttrObservations(
+      boardId,
+      startDate,
+      endDate,
+    );
+
     if (recoveryHours.length === 0) {
       return {
         boardId,
@@ -150,23 +161,14 @@ export class MttrService {
       };
     }
 
-    recoveryHours.sort((a, b) => a - b);
+    // Array is already sorted by getMttrObservations
     const median = percentile(recoveryHours, 50);
 
     return {
       boardId,
-      medianHours: Math.round(median * 100) / 100,
+      medianHours: round2(median),
       band: classifyMTTR(median),
       incidentCount: recoveryHours.length,
     };
   }
-}
-
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  const index = (p / 100) * (sorted.length - 1);
-  const lower = Math.floor(index);
-  const upper = Math.ceil(index);
-  if (lower === upper) return sorted[lower];
-  return sorted[lower] + (index - lower) * (sorted[upper] - sorted[lower]);
 }

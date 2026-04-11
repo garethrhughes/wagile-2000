@@ -6,18 +6,14 @@ import {
   Query,
   Param,
   Body,
-  UseGuards,
   ParseIntPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiSecurity, ApiParam } from '@nestjs/swagger';
-import { ApiKeyAuthGuard } from '../auth/api-key-auth.guard.js';
+import { ApiTags, ApiOperation, ApiParam } from '@nestjs/swagger';
 import { RoadmapService } from './roadmap.service.js';
 import { RoadmapAccuracyQueryDto } from './dto/roadmap-accuracy-query.dto.js';
 import { CreateRoadmapConfigDto } from './dto/create-roadmap-config.dto.js';
 
 @ApiTags('roadmap')
-@ApiSecurity('api-key')
-@UseGuards(ApiKeyAuthGuard)
 @Controller('api/roadmap')
 export class RoadmapController {
   constructor(private readonly roadmapService: RoadmapService) {}

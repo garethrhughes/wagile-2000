@@ -15,6 +15,7 @@ import {
   JpdIdea,
   RoadmapConfig,
 } from '../database/entities/index.js';
+import { isWorkItem } from '../metrics/issue-type-filters.js';
 
 // ---------------------------------------------------------------------------
 // Response interfaces (exported for use by the controller and frontend types)
@@ -240,7 +241,7 @@ export class SprintDetailService {
 
     // Filter out Epics and Sub-tasks immediately
     const boardIssues = allBoardIssues.filter(
-      (i) => i.issueType !== 'Epic' && i.issueType !== 'Sub-task',
+      (i) => isWorkItem(i.issueType),
     );
 
     if (boardIssues.length === 0) {

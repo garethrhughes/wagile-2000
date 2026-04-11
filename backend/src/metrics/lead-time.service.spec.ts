@@ -7,7 +7,7 @@ import {
   BoardConfig,
 } from '../database/entities/index.js';
 
-function mockRepo<T>(): jest.Mocked<Repository<T>> {
+function mockRepo<T extends object>(): jest.Mocked<Repository<T>> {
   return {
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(null),
@@ -61,7 +61,7 @@ describe('LeadTimeService', () => {
 
     issueRepo.find.mockResolvedValue([
       { key: 'ACC-1', boardId: 'ACC', createdAt: created, fixVersion: null, labels: [] },
-    ] as JiraIssue[]);
+    ] as unknown as JiraIssue[]);
 
     const qb = {
       where: jest.fn().mockReturnThis(),
@@ -86,7 +86,9 @@ describe('LeadTimeService', () => {
       boardId: 'PLAT',
       boardType: 'kanban',
       doneStatusNames: ['Done'],
-    } as BoardConfig);
+      inProgressStatusNames: ['In Progress'],
+      dataStartDate: null,
+    } as unknown as BoardConfig);
 
     const created = new Date('2025-01-01');
     const inProgress = new Date('2025-01-05'); // started 4 days after creation
@@ -96,7 +98,7 @@ describe('LeadTimeService', () => {
 
     issueRepo.find.mockResolvedValue([
       { key: 'PLAT-1', boardId: 'PLAT', createdAt: created, fixVersion: null, labels: [] },
-    ] as JiraIssue[]);
+    ] as unknown as JiraIssue[]);
 
     const qb = {
       where: jest.fn().mockReturnThis(),
@@ -130,7 +132,7 @@ describe('LeadTimeService', () => {
       labels: [],
     }));
 
-    issueRepo.find.mockResolvedValue(issues as JiraIssue[]);
+    issueRepo.find.mockResolvedValue(issues as unknown as JiraIssue[]);
 
     const changelogs = issues.map((issue, i) => ({
       issueKey: issue.key,

@@ -9,9 +9,10 @@ export interface FilterState {
   setPeriodType: (type: 'sprint' | 'quarter') => void;
   setSelectedSprint: (sprintId: string | null) => void;
   setSelectedQuarter: (quarter: string | null) => void;
+  setAllBoards: () => void;
 }
 
-const ALL_BOARDS = ['ACC', 'BPT', 'SPS', 'OCS', 'DATA', 'PLAT'];
+const ALL_BOARDS = ['ACC', 'BPT', 'SPS', 'OCS', 'DATA', 'PLAT']
 
 export const useFilterStore = create<FilterState>((set) => ({
   selectedBoards: ALL_BOARDS,
@@ -30,6 +31,8 @@ export const useFilterStore = create<FilterState>((set) => ({
 
   setSelectedQuarter: (quarter: string | null) =>
     set({ selectedQuarter: quarter }),
-}));
 
-export { ALL_BOARDS };
+  setAllBoards: () => set({ selectedBoards: ALL_BOARDS }),
+}))
+
+export { ALL_BOARDS }
