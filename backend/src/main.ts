@@ -28,10 +28,6 @@ async function bootstrap() {
       'REST API for Wagile — Jira DORA metrics and sprint planning accuracy.',
     )
     .setVersion('1.0')
-    .addApiKey(
-      { type: 'apiKey', name: 'x-api-key', in: 'header' },
-      'api-key',
-    )
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);

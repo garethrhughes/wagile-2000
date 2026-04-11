@@ -1,38 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useAuthStore } from './auth-store';
 import { useFilterStore, ALL_BOARDS } from './filter-store';
-
-// ---------------------------------------------------------------------------
-// Auth Store
-// ---------------------------------------------------------------------------
-
-describe('useAuthStore', () => {
-  beforeEach(() => {
-    localStorage.clear();
-    // Reset store state
-    useAuthStore.setState({ apiKey: null });
-  });
-
-  it('starts with null apiKey', () => {
-    const { apiKey } = useAuthStore.getState();
-    expect(apiKey).toBeNull();
-  });
-
-  it('sets apiKey and persists to localStorage', () => {
-    useAuthStore.getState().setApiKey('test-key-123');
-
-    expect(useAuthStore.getState().apiKey).toBe('test-key-123');
-    expect(localStorage.getItem('dashboard_api_key')).toBe('test-key-123');
-  });
-
-  it('clears apiKey and removes from localStorage', () => {
-    useAuthStore.getState().setApiKey('some-key');
-    useAuthStore.getState().clearApiKey();
-
-    expect(useAuthStore.getState().apiKey).toBeNull();
-    expect(localStorage.getItem('dashboard_api_key')).toBeNull();
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Filter Store
@@ -84,5 +51,11 @@ describe('useFilterStore', () => {
   it('sets selected quarter', () => {
     useFilterStore.getState().setSelectedQuarter('2025-Q2');
     expect(useFilterStore.getState().selectedQuarter).toBe('2025-Q2');
+  });
+
+  it('setAllBoards restores selectedBoards to ALL_BOARDS', () => {
+    useFilterStore.getState().setSelectedBoards(['ACC']);
+    useFilterStore.getState().setAllBoards();
+    expect(useFilterStore.getState().selectedBoards).toEqual(ALL_BOARDS);
   });
 });

@@ -8,8 +8,6 @@ vi.stubGlobal('fetch', mockFetch);
 describe('apiFetch', () => {
   beforeEach(() => {
     mockFetch.mockReset();
-    // Clear localStorage
-    localStorage.clear();
   });
 
   it('is a function', () => {
@@ -28,22 +26,6 @@ describe('apiFetch', () => {
     const [, options] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect((options.headers as Record<string, string>)['Content-Type']).toBe(
       'application/json',
-    );
-  });
-
-  it('attaches x-api-key from localStorage', async () => {
-    localStorage.setItem('dashboard_api_key', 'my-secret-key');
-
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ ok: true }),
-    });
-
-    await apiFetch('/api/secure');
-
-    const [, options] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect((options.headers as Record<string, string>)['x-api-key']).toBe(
-      'my-secret-key',
     );
   });
 

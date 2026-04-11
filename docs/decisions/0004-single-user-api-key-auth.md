@@ -1,7 +1,7 @@
 # 0004 — Single-User API Key Auth via Passport HeaderAPIKeyStrategy
 
 **Date:** 2026-04-10
-**Status:** Accepted
+**Status:** Superseded by [Proposal 0009 / ADR-0020](../proposals/0009-remove-api-key-auth.md)
 **Deciders:** Project setup team
 **Proposal:** N/A
 

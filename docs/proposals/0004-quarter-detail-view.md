@@ -5,6 +5,11 @@
 **Author:** Architect Agent
 **Related ADRs:** [ADR-0016](../decisions/0016-quarter-detail-view.md)
 
+> **Note:** Code snippets in this proposal that include `@ApiSecurity('api-key')`,
+> `@UseGuards(ApiKeyAuthGuard)`, or `import { ApiKeyAuthGuard }` reflect the
+> implementation at time of writing. These decorators were subsequently removed by
+> [Proposal 0009](0009-remove-api-key-auth.md) / [ADR-0020](../decisions/0020-no-application-level-authentication.md).
+
 ---
 
 ## Problem Statement

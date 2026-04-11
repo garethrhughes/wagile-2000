@@ -4,7 +4,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
 import { HealthModule } from './health/health.module.js';
-import { AuthModule } from './auth/auth.module.js';
 import { JiraModule } from './jira/jira.module.js';
 import { SyncModule } from './sync/sync.module.js';
 import { BoardsModule } from './boards/boards.module.js';
@@ -36,7 +35,6 @@ import { WeekModule } from './week/week.module.js';
         synchronize: false,
       }),
     }),
-    AuthModule,
     JiraModule,
     SyncModule,
     BoardsModule,
