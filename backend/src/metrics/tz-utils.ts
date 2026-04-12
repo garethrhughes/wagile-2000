@@ -31,6 +31,10 @@ export function midnightInTz(
   day: number,
   tz: string,
 ): Date {
+  // Normalise month overflow (e.g. month=12 → Jan of next year)
+  while (month > 11) { month -= 12; year += 1; }
+  while (month < 0)  { month += 12; year -= 1; }
+
   // Normalise day=0 (JS "last day of prior month" convention) to a real calendar day
   if (day === 0) {
     month -= 1;
