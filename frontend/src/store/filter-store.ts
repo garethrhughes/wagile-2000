@@ -1,21 +1,22 @@
-import { create } from 'zustand';
+import { create } from 'zustand'
+import { useBoardsStore } from './boards-store'
 
 export interface FilterState {
-  selectedBoards: string[];
-  periodType: 'sprint' | 'quarter';
-  selectedSprint: string | null;
-  selectedQuarter: string | null;
-  setSelectedBoards: (boards: string[]) => void;
-  setPeriodType: (type: 'sprint' | 'quarter') => void;
-  setSelectedSprint: (sprintId: string | null) => void;
-  setSelectedQuarter: (quarter: string | null) => void;
-  setAllBoards: () => void;
+  selectedBoards: string[]
+  periodType: 'sprint' | 'quarter'
+  selectedSprint: string | null
+  selectedQuarter: string | null
+  setSelectedBoards: (boards: string[]) => void
+  setPeriodType: (type: 'sprint' | 'quarter') => void
+  setSelectedSprint: (sprintId: string | null) => void
+  setSelectedQuarter: (quarter: string | null) => void
+  /** Reset selectedBoards to the full list from the boards store. */
+  setAllBoards: () => void
 }
 
-const ALL_BOARDS = ['ACC', 'BPT', 'SPS', 'OCS', 'DATA', 'PLAT']
-
 export const useFilterStore = create<FilterState>((set) => ({
-  selectedBoards: ALL_BOARDS,
+  // starts empty; populated by AppInitialiser once boards load
+  selectedBoards: [],
   periodType: 'quarter',
   selectedSprint: null,
   selectedQuarter: null,
@@ -32,7 +33,6 @@ export const useFilterStore = create<FilterState>((set) => ({
   setSelectedQuarter: (quarter: string | null) =>
     set({ selectedQuarter: quarter }),
 
-  setAllBoards: () => set({ selectedBoards: ALL_BOARDS }),
+  setAllBoards: () =>
+    set({ selectedBoards: useBoardsStore.getState().allBoards }),
 }))
-
-export { ALL_BOARDS }

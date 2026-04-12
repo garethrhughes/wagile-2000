@@ -14,5 +14,7 @@
 | [0010](0010-roadmap-accuracy-date-filtering.md) | Roadmap Accuracy Date Filtering | Proposed | 2026-04-12 |
 | [0011](0011-back-button-and-navigation-state-persistence.md) | Back Button and Navigation State Persistence | Draft | 2026-04-12 |
 | [0012](0012-roadmap-coverage-semantics.md) | Roadmap Coverage Semantics: Per-Issue Delivery Against Target Date | Accepted | 2026-04-12 |
-| [0013](0013-planning-accuracy-and-gaps-report.md) | Planning Accuracy Points Metric & Issues Gaps Report | Draft | 2026-04-12 |
-| [0014](0014-gaps-report-filtering.md) | Gaps Report Filtering: Active Sprint and Kanban Board Rules | Draft | 2026-04-12 |
+| [0013](0013-planning-accuracy-and-gaps-report.md) | Planning Accuracy Points Metric & Issues Gaps Report | Accepted | 2026-04-12 |
+| [0014](0014-gaps-report-filtering.md) | Gaps Report Filtering: Active Sprint and Kanban Board Rules | Accepted | 2026-04-12 |
+| [0015](0015-configurable-board-ids.md) | Configurable Board IDs: Replace Hardcoded Constants with Dynamic API Data | Accepted | 2026-04-12 |
+| [0016](0016-ui-driven-board-management.md) | UI-Driven Board Management: Remove `JIRA_BOARD_IDS` and Replace with CRUD API + Settings UI | Accepted | 2026-04-12 |

@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Loader2, ChevronDown, ChevronRight } from 'lucide-react'
 import { getGaps, type GapIssue, type GapsResponse } from '@/lib/api'
-import { ALL_BOARDS } from '@/store/filter-store'
+import { useBoardsStore } from '@/store/boards-store'
 import { BoardChip } from '@/components/ui/board-chip'
 import { DataTable, type Column } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
+import { NoBoardsConfigured } from '@/components/ui/no-boards-configured'
 
 // ---------------------------------------------------------------------------
 // Collapsible section
@@ -141,6 +142,9 @@ export default function GapsPage() {
   const [data, setData] = useState<GapsResponse | null>(null)
   const [selectedBoard, setSelectedBoard] = useState<string | null>(null)
 
+  const allBoards = useBoardsStore((s) => s.allBoards)
+  const boardsStatus = useBoardsStore((s) => s.status)
+
   useEffect(() => {
     let cancelled = false
     setLoading(true)
@@ -189,6 +193,11 @@ export default function GapsPage() {
         </p>
       </div>
 
+      {/* No boards configured */}
+      {boardsStatus === 'ready' && allBoards.length === 0 && (
+        <NoBoardsConfigured />
+      )}
+
       {/* Board filter */}
       <div className="rounded-xl border border-border bg-card p-4">
         <label className="mb-2 block text-sm font-medium text-muted">Board</label>
@@ -204,7 +213,7 @@ export default function GapsPage() {
           >
             All
           </button>
-          {ALL_BOARDS.map((boardId) => (
+          {allBoards.map((boardId) => (
             <BoardChip
               key={boardId}
               boardId={boardId}

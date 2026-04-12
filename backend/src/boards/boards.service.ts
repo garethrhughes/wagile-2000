@@ -1,17 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { BoardConfig } from '../database/entities/index.js';
+import { CreateBoardDto } from './dto/create-board.dto.js';
 import { UpdateBoardConfigDto } from './dto/update-board-config.dto.js';
-
-const DEFAULT_BOARDS: { boardId: string; boardType: string }[] = [
-  { boardId: 'ACC', boardType: 'scrum' },
-  { boardId: 'BPT', boardType: 'scrum' },
-  { boardId: 'SPS', boardType: 'scrum' },
-  { boardId: 'OCS', boardType: 'scrum' },
-  { boardId: 'DATA', boardType: 'scrum' },
-  { boardId: 'PLAT', boardType: 'kanban' },
-];
 
 @Injectable()
 export class BoardsService {
@@ -31,8 +23,12 @@ export class BoardsService {
     if (!config) {
       config = this.boardConfigRepo.create({
         boardId,
-        boardType: boardId === 'PLAT' ? 'kanban' : 'scrum',
+        boardType: 'scrum',
       });
+      this.logger.warn(
+        `Board config for "${boardId}" not found. Creating a fallback scrum config. ` +
+        `Add the board via the Settings UI for proper configuration.`,
+      );
       config = await this.boardConfigRepo.save(config);
     }
     return config;
@@ -47,20 +43,25 @@ export class BoardsService {
     return this.boardConfigRepo.save(config);
   }
 
-  async seedDefaults(): Promise<BoardConfig[]> {
-    const seeded: BoardConfig[] = [];
+  async createBoard(dto: CreateBoardDto): Promise<BoardConfig> {
+    const boardId = dto.boardId.trim().toUpperCase();
 
-    for (const { boardId, boardType } of DEFAULT_BOARDS) {
-      const existing = await this.boardConfigRepo.findOne({
-        where: { boardId },
-      });
-      if (!existing) {
-        const config = this.boardConfigRepo.create({ boardId, boardType });
-        seeded.push(await this.boardConfigRepo.save(config));
-        this.logger.log(`Seeded default config for board ${boardId}`);
-      }
+    const existing = await this.boardConfigRepo.findOne({ where: { boardId } });
+    if (existing) {
+      throw new ConflictException(`Board "${boardId}" already exists`);
     }
 
-    return seeded;
+    const config = this.boardConfigRepo.create({
+      boardId,
+      boardType: dto.boardType,
+    });
+    return this.boardConfigRepo.save(config);
+  }
+
+  async deleteBoard(boardId: string): Promise<void> {
+    const result = await this.boardConfigRepo.delete({ boardId });
+    if (result.affected === 0) {
+      throw new NotFoundException(`Board "${boardId}" not found`);
+    }
   }
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import { useReplaceParams } from '@/hooks/use-page-params'
@@ -20,16 +20,15 @@ import type {
 import {
   getDoraAggregate,
   getDoraTrend,
-  getBoards,
   type OrgDoraResult,
   type TrendPoint,
-  type BoardConfig,
 } from '@/lib/api'
-import { ALL_BOARDS } from '@/store/filter-store'
+import { useBoardsStore } from '@/store/boards-store'
 import { OrgMetricCard } from '@/components/ui/org-metric-card'
 import { BoardBreakdownTable } from '@/components/ui/board-breakdown-table'
 import { BoardChip } from '@/components/ui/board-chip'
 import { EmptyState } from '@/components/ui/empty-state'
+import { NoBoardsConfigured } from '@/components/ui/no-boards-configured'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -143,45 +142,31 @@ export default function DoraPage() {
   const searchParams = useSearchParams()
   const replaceParams = useReplaceParams()
 
+  // Board catalogue from store (fetched once by AppInitialiser)
+  const allBoards = useBoardsStore((s) => s.allBoards)
+  const kanbanBoardIds = useBoardsStore((s) => s.kanbanBoardIds)
+  const boardsStatus = useBoardsStore((s) => s.status)
+
   // Filter state lives in the URL — defaults applied when params are absent.
   // useMemo stabilises the array reference so it doesn't change on every render
   // and trigger the data-fetch useEffect in an infinite loop.
   const boardsParam = searchParams.get('boards')
   const selectedBoards = useMemo<string[]>(
-    () => (boardsParam ? boardsParam.split(',').filter(Boolean) : ALL_BOARDS),
-    [boardsParam],
+    () => (boardsParam ? boardsParam.split(',').filter(Boolean) : allBoards),
+    [boardsParam, allBoards],
   )
   const periodType = (searchParams.get('mode') ?? 'quarter') as 'sprint' | 'quarter'
 
   const [pageState, setPageState] = useState<PageState>({ status: 'idle' })
 
-  // RC-7: fetch board configs on mount to know which boards are Kanban
-  const kanbanBoardIds = useRef<Set<string>>(new Set())
-  const [boardsLoaded, setBoardsLoaded] = useState(false)
-
-  useEffect(() => {
-    getBoards()
-      .then((boards: BoardConfig[]) => {
-        kanbanBoardIds.current = new Set(
-          boards
-            .filter((b) => b.boardType === 'kanban')
-            .map((b) => b.boardId),
-        )
-        setBoardsLoaded(true)
-      })
-      .catch(() => {
-        // Non-fatal — fall back to empty set (no Kanban boards detected)
-        setBoardsLoaded(true)
-      })
-  }, [])
-
-  // Sprint mode is only valid when exactly 1 non-Kanban board is selected
+  // Sprint mode is only valid when exactly 1 non-Kanban board is selected.
+  // Depends on boardsStatus so it re-evaluates once the store is ready.
   const sprintModeAvailable = useMemo(
     () =>
+      boardsStatus === 'ready' &&
       selectedBoards.length === 1 &&
-      !kanbanBoardIds.current.has(selectedBoards[0]),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedBoards, boardsLoaded],
+      !kanbanBoardIds.has(selectedBoards[0] ?? ''),
+    [selectedBoards, kanbanBoardIds, boardsStatus],
   )
 
   // Auto-reset to quarter when sprint mode becomes unavailable
@@ -282,6 +267,11 @@ export default function DoraPage() {
         </p>
       </div>
 
+      {/* No boards configured */}
+      {boardsStatus === 'ready' && allBoards.length === 0 && (
+        <NoBoardsConfigured />
+      )}
+
       {/* Filters */}
       <div className="space-y-4 rounded-xl border border-border bg-card p-4">
         {/* Board selector */}
@@ -290,15 +280,15 @@ export default function DoraPage() {
             <label className="text-sm font-medium text-muted">Boards</label>
             <button
               type="button"
-              onClick={() => replaceParams({ boards: ALL_BOARDS.join(',') })}
+              onClick={() => replaceParams({ boards: allBoards.join(',') })}
               className="text-xs text-blue-600 hover:underline"
             >
               Select all
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
-            {ALL_BOARDS.map((boardId) => {
-              const isKanban = kanbanBoardIds.current.has(boardId)
+            {allBoards.map((boardId) => {
+              const isKanban = kanbanBoardIds.has(boardId)
               const disabledForSprint = periodType === 'sprint' && isKanban
               return (
                 <BoardChip

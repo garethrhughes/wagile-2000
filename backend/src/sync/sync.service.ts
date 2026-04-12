@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
@@ -27,7 +26,6 @@ export class SyncService {
 
   constructor(
     private readonly jiraClient: JiraClientService,
-    private readonly configService: ConfigService,
     @InjectRepository(JiraSprint)
     private readonly sprintRepo: Repository<JiraSprint>,
     @InjectRepository(JiraIssue)
@@ -55,11 +53,8 @@ export class SyncService {
   }
 
   async syncAll(): Promise<{ boards: string[]; results: SyncLog[] }> {
-    const boardIdsStr = this.configService.get<string>(
-      'JIRA_BOARD_IDS',
-      'ACC,BPT,SPS,OCS,DATA,PLAT',
-    );
-    const boardIds = boardIdsStr.split(',').map((id) => id.trim());
+    const configs = await this.boardConfigRepo.find();
+    const boardIds = configs.map((c) => c.boardId);
     const results: SyncLog[] = [];
 
     for (const boardId of boardIds) {
@@ -163,9 +158,15 @@ export class SyncService {
     });
     if (existing) return existing;
 
+    // Safety net: should not occur in normal operation.
+    // If reached, a board config was deleted while sync was running.
+    this.logger.warn(
+      `Board config for "${boardId}" not found during sync. ` +
+      `Creating a fallback scrum config. Re-add the board via Settings.`,
+    );
     const config = this.boardConfigRepo.create({
       boardId,
-      boardType: boardId === 'PLAT' ? 'kanban' : 'scrum',
+      boardType: 'scrum',
     });
     return this.boardConfigRepo.save(config);
   }
@@ -549,11 +550,8 @@ export class SyncService {
   async getStatus(): Promise<
     { boardId: string; lastSync: Date | null; status: string }[]
   > {
-    const boardIdsStr = this.configService.get<string>(
-      'JIRA_BOARD_IDS',
-      'ACC,BPT,SPS,OCS,DATA,PLAT',
-    );
-    const boardIds = boardIdsStr.split(',').map((id) => id.trim());
+    const configs = await this.boardConfigRepo.find();
+    const boardIds = configs.map((c) => c.boardId);
 
     const results: { boardId: string; lastSync: Date | null; status: string }[] =
       [];

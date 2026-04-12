@@ -20,16 +20,11 @@ import {
   getRoadmapConfigs,
   type RoadmapSprintAccuracy,
 } from '@/lib/api'
-import { ALL_BOARDS } from '@/store/filter-store'
+import { useBoardsStore } from '@/store/boards-store'
 import { BoardChip } from '@/components/ui/board-chip'
 import { DataTable, type Column } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const KANBAN_BOARDS = new Set(['PLAT']);
+import { NoBoardsConfigured } from '@/components/ui/no-boards-configured'
 
 // ---------------------------------------------------------------------------
 // Quarter helpers
@@ -220,8 +215,13 @@ export default function RoadmapPage() {
   const searchParams = useSearchParams()
   const replaceParams = useReplaceParams()
 
+  // Board catalogue from store
+  const allBoards = useBoardsStore((s) => s.allBoards)
+  const kanbanBoardIds = useBoardsStore((s) => s.kanbanBoardIds)
+  const boardsStatus = useBoardsStore((s) => s.status)
+
   // Filter state lives in the URL — defaults applied when params are absent
-  const selectedBoard = searchParams.get('board') ?? 'ACC'
+  const selectedBoard = searchParams.get('board') ?? (allBoards[0] ?? '')
   const periodType = (searchParams.get('mode') ?? 'sprint') as 'sprint' | 'quarter'
   const kanbanPeriod = (searchParams.get('kanban') ?? 'week') as 'quarter' | 'week'
 
@@ -231,7 +231,7 @@ export default function RoadmapPage() {
   const [kanbanWeekData, setKanbanWeekData] = useState<RoadmapSprintAccuracy[]>([])
   const [hasConfigs, setHasConfigs] = useState<boolean | null>(null)
 
-  const isKanban = KANBAN_BOARDS.has(selectedBoard)
+  const isKanban = kanbanBoardIds.has(selectedBoard)
 
   // Check if any roadmap configs exist on mount
   useEffect(() => {
@@ -247,7 +247,7 @@ export default function RoadmapPage() {
 
   const handleSelectBoard = useCallback((boardId: string) => {
     // Kanban boards have no sprints — switch to quarter view automatically
-    if (KANBAN_BOARDS.has(boardId)) {
+    if (kanbanBoardIds.has(boardId)) {
       replaceParams({ board: boardId, mode: 'quarter' })
     } else {
       replaceParams({ board: boardId })
@@ -255,10 +255,11 @@ export default function RoadmapPage() {
     setRawData([])
     setKanbanWeekData([])
     setError(null)
-  }, [replaceParams])
+  }, [replaceParams, kanbanBoardIds])
 
   // Fetch roadmap accuracy data whenever board or kanbanPeriod changes
   useEffect(() => {
+    if (boardsStatus !== 'ready') return;
     // For Kanban weekly mode, use separate fetch below
     if (isKanban && kanbanPeriod === 'week') return;
 
@@ -285,10 +286,11 @@ export default function RoadmapPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedBoard, isKanban, kanbanPeriod]);
+  }, [selectedBoard, isKanban, kanbanPeriod, boardsStatus]);
 
   // Fetch weekly roadmap accuracy data for Kanban boards
   useEffect(() => {
+    if (boardsStatus !== 'ready') return;
     if (!isKanban || kanbanPeriod !== 'week') return;
 
     let cancelled = false;
@@ -314,7 +316,7 @@ export default function RoadmapPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedBoard, isKanban, kanbanPeriod]);
+  }, [selectedBoard, isKanban, kanbanPeriod, boardsStatus]);
 
   // Quarter rows derived client-side from raw sprint data
   const quarterRows = useMemo(() => groupByQuarter(rawData), [rawData]);
@@ -584,6 +586,11 @@ export default function RoadmapPage() {
         </p>
       </div>
 
+      {/* No boards configured */}
+      {boardsStatus === 'ready' && allBoards.length === 0 && (
+        <NoBoardsConfigured />
+      )}
+
       {/* No configs empty state */}
       {!hasConfigs && (
         <EmptyState
@@ -602,7 +609,7 @@ export default function RoadmapPage() {
                 Board
               </label>
               <div className="flex flex-wrap gap-2">
-                {ALL_BOARDS.map((boardId) => (
+                {allBoards.map((boardId) => (
                   <BoardChip
                     key={boardId}
                     boardId={boardId}

@@ -159,6 +159,9 @@ export async function apiFetch<T>(
     throw new ApiError(res.status, `API error ${res.status}: ${body}`)
   }
 
+  // 204 No Content — return undefined (caller must type as Promise<void>)
+  if (res.status === 204) return undefined as T
+
   return res.json() as Promise<T>
 }
 
@@ -198,6 +201,24 @@ export function updateBoardConfig(
     method: 'PUT',
     body: JSON.stringify(config),
   });
+}
+
+export interface CreateBoardRequest {
+  boardId: string
+  boardType: 'scrum' | 'kanban'
+}
+
+export function createBoard(body: CreateBoardRequest): Promise<BoardConfig> {
+  return apiFetch<BoardConfig>('/api/boards', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export function deleteBoard(boardId: string): Promise<void> {
+  return apiFetch(`/api/boards/${encodeURIComponent(boardId)}`, {
+    method: 'DELETE',
+  })
 }
 
 export function getDoraMetrics(

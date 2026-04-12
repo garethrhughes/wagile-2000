@@ -1,11 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Save, Loader2, CheckCircle, XCircle, Plus, Trash2, RefreshCw } from 'lucide-react';
+import { Save, Loader2, CheckCircle, XCircle, Plus, Trash2, RefreshCw, X } from 'lucide-react';
 import {
   getBoards,
   getBoardConfig,
   updateBoardConfig,
+  createBoard,
+  deleteBoard,
   getRoadmapConfigs,
   createRoadmapConfig,
   updateRoadmapConfig,
@@ -13,7 +15,9 @@ import {
   triggerRoadmapSync,
   type BoardConfig,
   type RoadmapConfig,
+  ApiError,
 } from '@/lib/api'
+import { useBoardsStore } from '@/store/boards-store'
 
 // ---------------------------------------------------------------------------
 // Toast helper
@@ -128,6 +132,14 @@ export default function SettingsPage() {
   const [configLoading, setConfigLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Add board form state
+  const [newBoardId, setNewBoardId] = useState('');
+  const [newBoardType, setNewBoardType] = useState<'scrum' | 'kanban'>('scrum');
+  const [boardAdding, setBoardAdding] = useState(false);
+
+  // Global store refresh
+  const refreshBoards = useBoardsStore((s) => s.refreshBoards);
+
   // JPD / Roadmap config
   const [jpdConfigs, setJpdConfigs] = useState<RoadmapConfig[]>([]);
   const [jpdConfigsLoading, setJpdConfigsLoading] = useState(false);
@@ -207,6 +219,55 @@ export default function SettingsPage() {
     }
   }, [activeBoard, config, show]);
 
+  // Add board
+  const handleAddBoard = useCallback(async () => {
+    const id = newBoardId.trim().toUpperCase();
+    if (!id) return;
+    setBoardAdding(true);
+    try {
+      const created = await createBoard({ boardId: id, boardType: newBoardType });
+      setBoardList((prev) => [...prev, created.boardId]);
+      setActiveBoard(created.boardId);
+      setNewBoardId('');
+      setNewBoardType('scrum');
+      show('success', `Board "${created.boardId}" added`);
+      void refreshBoards();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        show('error', `Board "${id}" already exists`);
+      } else {
+        show('error', 'Failed to add board');
+      }
+    } finally {
+      setBoardAdding(false);
+    }
+  }, [newBoardId, newBoardType, show, refreshBoards]);
+
+  // Delete board
+  const handleDeleteBoard = useCallback(async (id: string) => {
+    if (
+      !window.confirm(
+        `Remove board "${id}"? Synced data is retained but the board will no longer appear in the dashboard.`,
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await deleteBoard(id);
+      const remaining = boardList.filter((b) => b !== id);
+      setBoardList(remaining);
+      if (activeBoard === id) {
+        setActiveBoard(remaining[0] ?? null);
+        setConfig(null);
+      }
+      show('success', `Board "${id}" removed`);
+      void refreshBoards();
+    } catch {
+      show('error', `Failed to remove board "${id}"`);
+    }
+  }, [activeBoard, boardList, show, refreshBoards]);
+
   // Update a config field
   function updateField<K extends keyof BoardConfig>(
     key: K,
@@ -251,22 +312,74 @@ export default function SettingsPage() {
       <section className="rounded-xl border border-border bg-card p-6">
         <h2 className="mb-4 text-lg font-semibold">Board Configuration</h2>
 
+        {/* Add a board */}
+        <div className="mb-6">
+          <p className="mb-2 text-sm font-medium text-foreground">Add a board</p>
+          <div className="flex flex-wrap gap-2">
+            <input
+              type="text"
+              value={newBoardId}
+              onChange={(e) => setNewBoardId(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void handleAddBoard();
+              }}
+              placeholder="Board ID, e.g. ACC"
+              className="w-40 rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+            <select
+              value={newBoardType}
+              onChange={(e) => setNewBoardType(e.target.value as 'scrum' | 'kanban')}
+              className="rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            >
+              <option value="scrum">scrum</option>
+              <option value="kanban">kanban</option>
+            </select>
+            <button
+              type="button"
+              disabled={boardAdding || !newBoardId.trim()}
+              onClick={() => void handleAddBoard()}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+            >
+              {boardAdding ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Plus className="h-4 w-4" />
+              )}
+              {boardAdding ? 'Adding…' : 'Add Board'}
+            </button>
+          </div>
+        </div>
+
         {/* Board tabs */}
         {boardList.length > 0 && (
           <div className="mb-6 flex flex-wrap gap-1 border-b border-border">
             {boardList.map((id) => (
-              <button
+              <div
                 key={id}
-                type="button"
-                onClick={() => setActiveBoard(id)}
-                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                role="tab"
+                aria-selected={activeBoard === id}
+                className={`group relative flex cursor-pointer items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors ${
                   activeBoard === id
                     ? 'border-b-2 border-blue-600 text-blue-600'
                     : 'text-muted hover:text-foreground'
                 }`}
+                onClick={() => setActiveBoard(id)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setActiveBoard(id) }}
+                tabIndex={0}
               >
                 {id}
-              </button>
+                <button
+                  type="button"
+                  aria-label={`Remove board ${id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleDeleteBoard(id);
+                  }}
+                  className="ml-0.5 rounded-full p-0.5 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -378,9 +491,9 @@ export default function SettingsPage() {
           </p>
         )}
 
-        {boardList.length === 0 && !configLoading && (
+        {boardList.length === 0 && !configLoading && !boardAdding && (
           <p className="text-sm text-muted">
-            No boards available. Please sync data first.
+            No boards configured yet. Use the form above to add your first board.
           </p>
         )}
       </section>

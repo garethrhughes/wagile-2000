@@ -26,16 +26,11 @@ import {
   type KanbanWeekSummary,
   type RoadmapSprintAccuracy,
 } from '@/lib/api'
-import { ALL_BOARDS } from '@/store/filter-store'
+import { useBoardsStore } from '@/store/boards-store'
 import { BoardChip } from '@/components/ui/board-chip'
 import { DataTable, type Column } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const KANBAN_BOARDS = new Set(['PLAT']);
+import { NoBoardsConfigured } from '@/components/ui/no-boards-configured'
 
 // ---------------------------------------------------------------------------
 // Quarter helpers
@@ -260,8 +255,13 @@ export default function PlanningPage() {
   const searchParams = useSearchParams()
   const replaceParams = useReplaceParams()
 
+  // Board catalogue from store
+  const allBoards = useBoardsStore((s) => s.allBoards)
+  const kanbanBoardIds = useBoardsStore((s) => s.kanbanBoardIds)
+  const boardsStatus = useBoardsStore((s) => s.status)
+
   // Filter state lives in the URL — defaults applied when params are absent
-  const selectedBoard = searchParams.get('board') ?? 'ACC'
+  const selectedBoard = searchParams.get('board') ?? (allBoards[0] ?? '')
   const periodType = (searchParams.get('mode') ?? 'sprint') as 'sprint' | 'quarter'
   const kanbanPeriod = (searchParams.get('kanban') ?? 'week') as 'quarter' | 'week'
 
@@ -276,7 +276,7 @@ export default function PlanningPage() {
   const [roadmapConfigured, setRoadmapConfigured] = useState(false)
   const [roadmapLoading, setRoadmapLoading] = useState(false)
 
-  const isKanban = KANBAN_BOARDS.has(selectedBoard)
+  const isKanban = kanbanBoardIds.has(selectedBoard)
 
   const handleSelectBoard = useCallback((boardId: string) => {
     replaceParams({ board: boardId })
@@ -288,6 +288,7 @@ export default function PlanningPage() {
 
   // Fetch sprint data for Scrum boards
   useEffect(() => {
+    if (boardsStatus !== 'ready') return;
     if (isKanban) return;
 
     let cancelled = false;
@@ -311,7 +312,7 @@ export default function PlanningPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedBoard, isKanban]);
+  }, [selectedBoard, isKanban, boardsStatus]);
 
   // Fetch quarterly flow data for Kanban boards
   useEffect(() => {
@@ -369,6 +370,7 @@ export default function PlanningPage() {
 
   // Fetch roadmap accuracy summary for the selected board
   useEffect(() => {
+    if (boardsStatus !== 'ready') return;
     let cancelled = false
     setRoadmapLoading(true)
     setRoadmapData([])
@@ -398,7 +400,7 @@ export default function PlanningPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedBoard, isKanban])
+  }, [selectedBoard, isKanban, boardsStatus])
 
   // Quarter rows derived client-side from raw sprint data (Scrum)
   const quarterRows = useMemo(() => groupByQuarter(rawData), [rawData]);
@@ -720,6 +722,11 @@ export default function PlanningPage() {
         </p>
       </div>
 
+      {/* No boards configured */}
+      {boardsStatus === 'ready' && allBoards.length === 0 && (
+        <NoBoardsConfigured />
+      )}
+
       {/* Filters */}
       <div className="space-y-4 rounded-xl border border-border bg-card p-4">
         {/* Board selector */}
@@ -728,7 +735,7 @@ export default function PlanningPage() {
             Board
           </label>
           <div className="flex flex-wrap gap-2">
-            {ALL_BOARDS.map((boardId) => (
+            {allBoards.map((boardId) => (
               <BoardChip
                 key={boardId}
                 boardId={boardId}

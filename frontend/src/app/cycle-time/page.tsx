@@ -14,9 +14,10 @@ import {
   type QuarterInfo,
 } from '@/lib/api'
 import { classifyCycleTime } from '@/lib/cycle-time-bands'
-import { ALL_BOARDS } from '@/store/filter-store'
+import { useBoardsStore } from '@/store/boards-store'
 import { BoardChip } from '@/components/ui/board-chip'
 import { EmptyState } from '@/components/ui/empty-state'
+import { NoBoardsConfigured } from '@/components/ui/no-boards-configured'
 import { CycleTimePercentileCard } from '@/components/ui/cycle-time-percentile-card'
 import { CycleTimeTrendChart } from '@/components/ui/cycle-time-trend-chart'
 import { CycleTimeScatter } from '@/components/ui/cycle-time-scatter'
@@ -72,8 +73,12 @@ export default function CycleTimePage() {
   const searchParams = useSearchParams()
   const replaceParams = useReplaceParams()
 
+  // Board catalogue from store
+  const allBoards = useBoardsStore((s) => s.allBoards)
+  const boardsStatus = useBoardsStore((s) => s.status)
+
   // Filter state lives in the URL — defaults applied when params are absent
-  const selectedBoard = searchParams.get('board') ?? (ALL_BOARDS[0] ?? 'ACC')
+  const selectedBoard = searchParams.get('board') ?? (allBoards[0] ?? '')
   const selectedQuarter = searchParams.get('quarter') ?? ''
   const issueTypeFilter = searchParams.get('type') ?? ''
 
@@ -104,6 +109,7 @@ export default function CycleTimePage() {
 
   // Main data fetch — fires on filter change
   useEffect(() => {
+    if (boardsStatus !== 'ready') return
     if (!selectedQuarter) return
     let cancelled = false
     setPageState({ status: 'loading' })
@@ -140,7 +146,7 @@ export default function CycleTimePage() {
     return () => {
       cancelled = true
     }
-  }, [selectedBoard, selectedQuarter, issueTypeFilter])
+  }, [selectedBoard, selectedQuarter, issueTypeFilter, boardsStatus])
 
   // Compute pooled percentiles across all boards' results
   const pooled = useMemo(() => {
@@ -174,13 +180,18 @@ export default function CycleTimePage() {
         </p>
       </div>
 
+      {/* No boards configured */}
+      {boardsStatus === 'ready' && allBoards.length === 0 && (
+        <NoBoardsConfigured />
+      )}
+
       {/* Filters */}
       <div className="space-y-4 rounded-xl border border-border bg-card p-4">
         {/* Board selector — single select */}
         <div>
           <label className="mb-2 block text-sm font-medium text-muted">Board</label>
           <div className="flex flex-wrap gap-2">
-            {ALL_BOARDS.map((boardId) => (
+            {allBoards.map((boardId) => (
               <BoardChip
                 key={boardId}
                 boardId={boardId}
