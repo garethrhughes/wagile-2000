@@ -128,7 +128,7 @@ export class RoadmapService {
     const doneStatusNames: string[] =
       boardConfig?.doneStatusNames ?? ['Done', 'Closed', 'Released'];
     const cancelledStatusNames: string[] =
-      boardConfig?.cancelledStatusNames ?? ['Cancelled'];
+      boardConfig?.cancelledStatusNames ?? ['Cancelled', "Won't Do"];
 
     if (sprints.length === 0) {
       return [];

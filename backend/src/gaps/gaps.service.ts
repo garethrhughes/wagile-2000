@@ -52,7 +52,7 @@ export class GapsService {
 
     for (const cfg of configs) {
       doneByBoard.set(cfg.boardId, cfg.doneStatusNames ?? ['Done', 'Closed', 'Released']);
-      cancelledByBoard.set(cfg.boardId, cfg.cancelledStatusNames ?? ['Cancelled']);
+      cancelledByBoard.set(cfg.boardId, cfg.cancelledStatusNames ?? ['Cancelled', "Won't Do"]);
       if (cfg.boardType === 'kanban') kanbanBoardIds.add(cfg.boardId);
     }
 

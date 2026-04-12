@@ -66,6 +66,6 @@ export class BoardConfig {
    * nor the denominator) and are shown with a dash in the sprint detail view.
    * Uses simple-json to support status names containing commas.
    */
-  @Column({ type: 'simple-json', default: '["Cancelled"]' })
+  @Column({ type: 'simple-json', default: '["Cancelled","Won\'t Do"]' })
   cancelledStatusNames!: string[];
 }

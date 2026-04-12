@@ -4,7 +4,7 @@ export class AddCancelledStatusNamesToBoardConfigs1775820884077 implements Migra
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
       `ALTER TABLE "board_configs"
-         ADD COLUMN IF NOT EXISTS "cancelledStatusNames" TEXT NOT NULL DEFAULT '["Cancelled"]'`,
+         ADD COLUMN IF NOT EXISTS "cancelledStatusNames" TEXT NOT NULL DEFAULT '["Cancelled","Won''t Do"]'`,
     );
   }
 

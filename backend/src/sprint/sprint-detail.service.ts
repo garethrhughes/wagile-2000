@@ -226,7 +226,7 @@ export class SprintDetailService {
     const failureLabels: string[] = boardConfig?.failureLabels ?? [];
     const incidentIssueTypes: string[] = boardConfig?.incidentIssueTypes ?? [];
     const incidentLabels: string[] = boardConfig?.incidentLabels ?? [];
-    const cancelledStatusNames: string[] = boardConfig?.cancelledStatusNames ?? ['Cancelled'];
+    const cancelledStatusNames: string[] = boardConfig?.cancelledStatusNames ?? ['Cancelled', "Won't Do"];
 
     const boardConfigShape: SprintDetailBoardConfig = {
       doneStatusNames,
