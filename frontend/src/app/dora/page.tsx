@@ -143,11 +143,14 @@ export default function DoraPage() {
   const searchParams = useSearchParams()
   const replaceParams = useReplaceParams()
 
-  // Filter state lives in the URL — defaults applied when params are absent
+  // Filter state lives in the URL — defaults applied when params are absent.
+  // useMemo stabilises the array reference so it doesn't change on every render
+  // and trigger the data-fetch useEffect in an infinite loop.
   const boardsParam = searchParams.get('boards')
-  const selectedBoards: string[] = boardsParam
-    ? boardsParam.split(',').filter(Boolean)
-    : ALL_BOARDS
+  const selectedBoards = useMemo<string[]>(
+    () => (boardsParam ? boardsParam.split(',').filter(Boolean) : ALL_BOARDS),
+    [boardsParam],
+  )
   const periodType = (searchParams.get('mode') ?? 'quarter') as 'sprint' | 'quarter'
 
   const [pageState, setPageState] = useState<PageState>({ status: 'idle' })
