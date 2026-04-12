@@ -480,25 +480,45 @@ export class SyncService {
         idea.deliveryIssueKeys = deliveryIssueKeys.length > 0 ? deliveryIssueKeys : null;
 
         // Extract date fields if configured.
-        // Polaris interval fields return { start: "YYYY-MM-DD", end: "YYYY-MM-DD" };
-        // plain date fields return a "YYYY-MM-DD" string.
+        // Polaris interval fields are returned by the Jira API as a serialized
+        // JSON string: e.g. '{"start":"2026-04-01","end":"2026-06-30"}'.
+        // They may also arrive as a parsed object or a plain "YYYY-MM-DD" string.
         // For startDate we use the .start boundary; for targetDate we use .end.
-        const rawStartField = config?.startDateFieldId
-          ? (issue.fields[config.startDateFieldId] as { start?: string } | string | null | undefined) ?? null
-          : null;
-        const rawTargetField = config?.targetDateFieldId
-          ? (issue.fields[config.targetDateFieldId] as { end?: string } | string | null | undefined) ?? null
-          : null;
+        const parseIntervalField = (
+          raw: unknown,
+          boundary: 'start' | 'end',
+        ): string | null => {
+          if (raw === null || raw === undefined) return null
+          // Already a parsed object with the expected shape
+          if (typeof raw === 'object') {
+            const obj = raw as Record<string, unknown>
+            const val = obj[boundary]
+            return typeof val === 'string' ? val : null
+          }
+          if (typeof raw === 'string') {
+            // Try to parse as JSON first (Polaris interval serialized as string)
+            try {
+              const parsed = JSON.parse(raw) as Record<string, unknown>
+              const val = parsed[boundary]
+              if (typeof val === 'string') return val
+            } catch {
+              // Not JSON — fall through
+            }
+            // Plain date string (e.g. "2026-04-01") — use directly
+            return raw || null
+          }
+          return null
+        }
 
-        const rawStart = rawStartField !== null && typeof rawStartField === 'object'
-          ? (rawStartField.start ?? null)
-          : rawStartField ?? null;
-        const rawTarget = rawTargetField !== null && typeof rawTargetField === 'object'
-          ? (rawTargetField.end ?? null)
-          : rawTargetField ?? null;
+        const rawStart = config?.startDateFieldId
+          ? parseIntervalField(issue.fields[config.startDateFieldId], 'start')
+          : null
+        const rawTarget = config?.targetDateFieldId
+          ? parseIntervalField(issue.fields[config.targetDateFieldId], 'end')
+          : null
 
-        idea.startDate = rawStart ? new Date(rawStart) : null;
-        idea.targetDate = rawTarget ? new Date(rawTarget) : null;
+        idea.startDate = rawStart ? new Date(rawStart) : null
+        idea.targetDate = rawTarget ? new Date(rawTarget) : null
 
         ideas.push(idea);
       }
