@@ -13,6 +13,7 @@ import { RoadmapModule } from './roadmap/roadmap.module.js';
 import { SprintModule } from './sprint/sprint.module.js';
 import { QuarterModule } from './quarter/quarter.module.js';
 import { WeekModule } from './week/week.module.js';
+import { GapsModule } from './gaps/gaps.module.js';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { WeekModule } from './week/week.module.js';
     SprintModule,
     QuarterModule,
     WeekModule,
+    GapsModule,
     HealthModule,
   ],
 })

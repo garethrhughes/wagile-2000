@@ -42,6 +42,12 @@ export interface SprintAccuracy {
   completed: number;
   scopeChangePercent: number;
   completionRate: number;
+  /** Planning accuracy (0-100). null when commitment is zero. */
+  planningAccuracy: number | null;
+  /** Sum of committed story points. null signals ticket-count fallback. */
+  committedPoints: number | null;
+  /** Sum of completed committed story points. null signals ticket-count fallback. */
+  completedPoints: number | null;
 }
 
 export interface MetricsQueryParams {
@@ -744,4 +750,28 @@ export function getCycleTimeTrend(
       issueType: params.issueType,
     })}`,
   )
+}
+
+// ---- Gaps report types and endpoint --------------------------------------
+
+export interface GapIssue {
+  key: string
+  summary: string
+  issueType: string
+  status: string
+  boardId: string
+  sprintId: string | null
+  sprintName: string | null
+  points: number | null
+  epicKey: string | null
+  jiraUrl: string
+}
+
+export interface GapsResponse {
+  noEpic: GapIssue[]
+  noEstimate: GapIssue[]
+}
+
+export function getGaps(): Promise<GapsResponse> {
+  return apiFetch<GapsResponse>('/api/gaps')
 }

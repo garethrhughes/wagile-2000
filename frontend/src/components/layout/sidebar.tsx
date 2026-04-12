@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BarChart3, Target, Map, Settings, Timer, RefreshCw } from 'lucide-react'
+import { BarChart3, Target, Map, Settings, Timer, RefreshCw, AlertCircle } from 'lucide-react'
 import { useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { useSyncStore } from '@/store/sync-store'
@@ -17,6 +17,7 @@ const MAIN_NAV_ITEMS: NavItem[] = [
   { label: 'DORA', href: '/dora', icon: <BarChart3 className="h-5 w-5" /> },
   { label: 'Cycle Time', href: '/cycle-time', icon: <Timer className="h-5 w-5" /> },
   { label: 'Planning', href: '/planning', icon: <Target className="h-5 w-5" /> },
+  { label: 'Gaps', href: '/gaps', icon: <AlertCircle className="h-5 w-5" /> },
   { label: 'Roadmap', href: '/roadmap', icon: <Map className="h-5 w-5" /> },
 ]
 

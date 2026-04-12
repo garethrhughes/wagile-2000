@@ -406,16 +406,29 @@ export default function PlanningPage() {
   // ---------------------------------------------------------------------------
   // Scrum summary stats
   // ---------------------------------------------------------------------------
-  const { avgScopeChange, avgCompletion } = useMemo(() => {
-    const rows = periodType === 'quarter' ? quarterRows : rawData;
-    if (rows.length === 0) return { avgScopeChange: 0, avgCompletion: 0 };
-    const totalScope = rows.reduce((s, r) => s + r.scopeChangePercent, 0);
-    const totalComp = rows.reduce((s, r) => s + r.completionRate, 0);
+  const { avgScopeChange, avgCompletion, avgPlanningAccuracy, accuracyCount } = useMemo(() => {
+    const rows = periodType === 'quarter' ? quarterRows : rawData
+    if (rows.length === 0) return { avgScopeChange: 0, avgCompletion: 0, avgPlanningAccuracy: null, accuracyCount: 0 }
+    const totalScope = rows.reduce((s, r) => s + r.scopeChangePercent, 0)
+    const totalComp = rows.reduce((s, r) => s + r.completionRate, 0)
+
+    const nonNullAccuracies = rawData
+      .map(r => r.planningAccuracy)
+      .filter((v): v is number => v !== null)
+
+    const avgPlanningAccuracy = nonNullAccuracies.length > 0
+      ? nonNullAccuracies.reduce((s, v) => s + v, 0) / nonNullAccuracies.length
+      : null
+
+    const accuracyCount = nonNullAccuracies.length
+
     return {
       avgScopeChange: totalScope / rows.length,
       avgCompletion: totalComp / rows.length,
-    };
-  }, [rawData, quarterRows, periodType]);
+      avgPlanningAccuracy,
+      accuracyCount,
+    }
+  }, [rawData, quarterRows, periodType])
 
   // ---------------------------------------------------------------------------
   // Kanban summary stats
@@ -539,6 +552,25 @@ export default function PlanningPage() {
         label: 'Completion Rate',
         sortable: true,
         render: (value) => `${Number(value).toFixed(1)}%`,
+      },
+      {
+        key: 'planningAccuracy',
+        label: 'Planning Accuracy',
+        sortable: true,
+        render: (value, row) => {
+          if (value === null || value === undefined) return <span className="text-muted">—</span>
+          const pct = Number(value)
+          const color = pct >= 90 ? 'text-green-700 font-semibold' : pct >= 70 ? 'text-amber-600 font-semibold' : 'text-red-600 font-semibold'
+          const tooltip =
+            row.committedPoints !== null && row.completedPoints !== null
+              ? `${row.completedPoints} of ${row.committedPoints} committed points`
+              : undefined
+          return (
+            <span className={color} title={tooltip}>
+              {pct.toFixed(1)}%
+            </span>
+          )
+        },
       },
     ],
     [selectedBoard],
@@ -783,7 +815,7 @@ export default function PlanningPage() {
       {!loading && !error && hasData && (
         <>
           {/* Summary stats */}
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className={`grid gap-4 ${!isKanban && periodType === 'sprint' ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
             {isKanban ? (
               <>
                 <div className="rounded-xl border border-border bg-card p-5">
@@ -817,6 +849,27 @@ export default function PlanningPage() {
                     across all {periodType === 'sprint' ? `${rawData.length} sprint${rawData.length !== 1 ? 's' : ''}` : `${quarterRows.length} quarter${quarterRows.length !== 1 ? 's' : ''}`}
                   </p>
                 </div>
+                {periodType === 'sprint' && (
+                  <div className="rounded-xl border border-border bg-card p-5">
+                    <h3 className="text-sm font-medium text-muted">Avg Planning Accuracy</h3>
+                    <p className={`mt-2 text-3xl font-bold ${
+                      avgPlanningAccuracy === null
+                        ? ''
+                        : avgPlanningAccuracy >= 90
+                          ? 'text-green-700'
+                          : avgPlanningAccuracy >= 70
+                            ? 'text-amber-600'
+                            : 'text-red-600'
+                    }`}>
+                      {avgPlanningAccuracy !== null ? `${avgPlanningAccuracy.toFixed(1)}%` : '—'}
+                    </p>
+                    <p className="mt-1 text-xs text-muted">
+                      {accuracyCount > 0
+                        ? `across ${accuracyCount} sprint${accuracyCount !== 1 ? 's' : ''} with estimates`
+                        : 'no sprints with estimates'}
+                    </p>
+                  </div>
+                )}
               </>
             )}
           </div>

@@ -24,6 +24,14 @@ export interface SprintAccuracy {
   completed: number;
   scopeChangePercent: number;
   completionRate: number;
+  /** Planning accuracy: committed issues delivered / committed issues.
+   *  Uses story points when available, falls back to ticket count.
+   *  null when there are zero committed issues. */
+  planningAccuracy: number | null;
+  /** Sum of story points for committed issues. null signals ticket-count fallback. */
+  committedPoints: number | null;
+  /** Sum of story points completed from the committed set. null signals ticket-count fallback. */
+  completedPoints: number | null;
 }
 
 export interface QuarterInfo {
@@ -319,6 +327,50 @@ export class PlanningService {
           ) / 100
         : 0;
 
+    // ---- Planning accuracy ------------------------------------------------
+    // Build a points lookup from the already-loaded boardIssues array.
+    const issuePointsMap = new Map<string, number | null>(
+      boardIssues.map((i) => [i.key, i.points]),
+    );
+
+    let planningAccuracy: number | null = null;
+    let committedPoints: number | null = null;
+    let completedPoints: number | null = null;
+
+    if (committedKeys.size > 0) {
+      const committedArr = [...committedKeys];
+      const allNull = committedArr.every(
+        (k) => issuePointsMap.get(k) === null || issuePointsMap.get(k) === undefined,
+      );
+
+      if (!allNull) {
+        // Points path
+        const sumCommitted = committedArr.reduce(
+          (acc, k) => acc + (issuePointsMap.get(k) ?? 0),
+          0,
+        );
+        const sumCompleted = [...completedKeys]
+          .filter((k) => committedKeys.has(k))
+          .reduce((acc, k) => acc + (issuePointsMap.get(k) ?? 0), 0);
+
+        committedPoints = sumCommitted;
+        completedPoints = sumCompleted;
+        planningAccuracy =
+          sumCommitted > 0
+            ? Math.round((sumCompleted / sumCommitted) * 10000) / 100
+            : 0;
+      } else {
+        // Ticket-count fallback: committedPoints / completedPoints stay null
+        const completedFromCommitted = [...completedKeys].filter((k) =>
+          committedKeys.has(k),
+        ).length;
+        planningAccuracy =
+          Math.round(
+            (completedFromCommitted / committedKeys.size) * 10000,
+          ) / 100;
+      }
+    }
+
     return {
       sprintId: sprint.id,
       sprintName: sprint.name,
@@ -330,6 +382,9 @@ export class PlanningService {
       completed,
       scopeChangePercent,
       completionRate,
+      planningAccuracy,
+      committedPoints,
+      completedPoints,
     };
   }
 
@@ -404,6 +459,9 @@ export class PlanningService {
       completed: 0,
       scopeChangePercent: 0,
       completionRate: 0,
+      planningAccuracy: null,
+      committedPoints: null,
+      completedPoints: null,
     };
   }
 
