@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -49,6 +50,7 @@ export type { CycleTimeResult, CycleTimeTrendPoint };
 @Injectable()
 export class MetricsService {
   private readonly logger = new Logger(MetricsService.name);
+  private readonly timezone: string;
 
   constructor(
     private readonly deploymentFrequencyService: DeploymentFrequencyService,
@@ -60,7 +62,10 @@ export class MetricsService {
     private readonly sprintRepo: Repository<JiraSprint>,
     @InjectRepository(BoardConfig)
     private readonly boardConfigRepo: Repository<BoardConfig>,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    this.timezone = this.configService.get<string>('TIMEZONE', 'UTC');
+  }
 
   async getDora(query: MetricsQueryDto): Promise<DoraMetricsResult[]> {
     let { startDate, endDate } = this.resolvePeriod(query);
@@ -393,8 +398,7 @@ export class MetricsService {
     }
 
     // Quarter mode (default)
-    const quarters = listRecentQuarters(limit); // newest first
-
+    const quarters = listRecentQuarters(limit, this.timezone); // newest first
     // RC-6: compute all quarters in parallel
     const points = await Promise.all(
       quarters.map(async (q): Promise<TrendPoint> => {
@@ -523,7 +527,7 @@ export class MetricsService {
     }
 
     // Quarter mode (default)
-    const quarters = listRecentQuarters(limit); // newest first
+    const quarters = listRecentQuarters(limit, this.timezone); // newest first
     const points = await Promise.all(
       quarters.map(async (q): Promise<CycleTimeTrendPoint> => {
         // Pool observations across all selected boards for a true cross-board median
@@ -578,7 +582,7 @@ export class MetricsService {
   } {
     // Quarter format: YYYY-QN
     if (query.quarter) {
-      const { startDate, endDate } = quarterToDates(query.quarter);
+      const { startDate, endDate } = quarterToDates(query.quarter, this.timezone);
       return { startDate, endDate };
     }
 

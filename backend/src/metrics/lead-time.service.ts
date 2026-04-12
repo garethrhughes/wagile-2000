@@ -17,7 +17,7 @@ export interface LeadTimeResult {
   p95Days: number;
   band: DoraBand;
   sampleSize: number;
-  /** Number of negative lead-time observations excluded from the sample */
+  /** Issues excluded because no in-progress transition was found (no work-started evidence) */
   anomalyCount: number;
 }
 

@@ -107,7 +107,7 @@ export class CfrService {
     // status in the period.  Only issues not already counted by the version
     // path are eligible so there is no double-counting.
     const noVersionKeys = allIssues
-      .filter((i) => i.fixVersion === null && !versionIssueKeys.has(i.key))
+      .filter((i) => !i.fixVersion && !versionIssueKeys.has(i.key))
       .map((i) => i.key);
 
     let transitionIssueKeys = new Set<string>();

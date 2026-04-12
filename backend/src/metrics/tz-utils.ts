@@ -31,29 +31,37 @@ export function midnightInTz(
   day: number,
   tz: string,
 ): Date {
-  // day=0 means "last day of the previous month" in JavaScript Date semantics,
-  // but an ISO string with day "00" is invalid. Normalise before building the string.
+  // Normalise day=0 (JS "last day of prior month" convention) to a real calendar day
   if (day === 0) {
     month -= 1;
-    if (month < 0) {
-      month = 11;
-      year -= 1;
-    }
-    // Last day of the (now decremented) month: use Date.UTC overflow to resolve
+    if (month < 0) { month = 11; year -= 1; }
     day = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   }
 
-  // Form the target local ISO string (no zone suffix — will be treated as UTC approximation)
   const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00`;
-  // Use UTC as the initial candidate
   const candidate = new Date(iso + 'Z');
-  // Find what local calendar date the candidate corresponds to in `tz`
-  const localParts = dateParts(candidate, tz);
-  // Compute UTC equivalent of midnight local using the detected offset
-  const localMidnight = new Date(
-    Date.UTC(localParts.year, localParts.month, localParts.day),
-  );
-  const offsetMs = candidate.getTime() - localMidnight.getTime();
-  // Subtract the offset to get the UTC instant that is midnight in `tz`
+
+  // Find the time-of-day the UTC candidate shows in `tz`.
+  // If offset is +11, candidate shows 11:00 — we need to subtract 11h to land at midnight local.
+  // If offset is -5, candidate shows 19:00 previous day — we add 5h (subtract negative).
+  const timeFmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const parts = timeFmt.formatToParts(candidate);
+  const hStr = parts.find((p) => p.type === 'hour')?.value ?? '00';
+  const mStr = parts.find((p) => p.type === 'minute')?.value ?? '00';
+  const sStr = parts.find((p) => p.type === 'second')?.value ?? '00';
+  let hours = parseInt(hStr, 10);
+  // hour12:false can return '24' for midnight in some runtimes — normalise
+  if (hours === 24) hours = 0;
+  const offsetMs =
+    hours * 3_600_000 +
+    parseInt(mStr, 10) * 60_000 +
+    parseInt(sStr, 10) * 1_000;
+
   return new Date(candidate.getTime() - offsetMs);
 }

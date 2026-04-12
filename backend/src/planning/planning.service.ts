@@ -489,19 +489,19 @@ export class PlanningService {
       order: { startDate: 'ASC' },
     });
 
+    const tz = this.configService.get<string>('TIMEZONE', 'UTC');
     const quarters = new Map<string, QuarterInfo>();
 
     for (const sprint of sprints) {
       if (!sprint.startDate) continue;
-      const d = sprint.startDate;
-      const q = Math.floor(d.getMonth() / 3) + 1;
-      const year = d.getFullYear();
+      const { year, month } = dateParts(sprint.startDate, tz);
+      const q = Math.floor(month / 3) + 1;
       const key = `${year}-Q${q}`;
 
       if (!quarters.has(key)) {
         const startMonth = (q - 1) * 3;
-        const startDate = new Date(year, startMonth, 1);
-        const endDate = new Date(year, startMonth + 3, 0, 23, 59, 59, 999);
+        const startDate = midnightInTz(year, startMonth, 1, tz);
+        const endDate = new Date(midnightInTz(year, startMonth + 3, 1, tz).getTime() - 1);
         quarters.set(key, {
           quarter: key,
           startDate: startDate.toISOString(),
@@ -663,7 +663,10 @@ export class PlanningService {
 
         // Use changelog-based completion date — avoids stale current-status snapshot
         const completedAt = completionDateByIssue.get(issue.key);
-        const isCompleted = completedAt !== undefined && completedAt <= endDate;
+        const isCompleted =
+          completedAt !== undefined &&
+          completedAt >= startDate &&
+          completedAt <= endDate;
         if (isCompleted) {
           completed++;
           pointsDone += pts;
@@ -836,7 +839,10 @@ export class PlanningService {
 
         // Use changelog-based completion date — avoids stale current-status snapshot
         const completedAt = completionDateByIssueWeeks.get(issue.key);
-        const isCompleted = completedAt !== undefined && completedAt <= weekEnd;
+        const isCompleted =
+          completedAt !== undefined &&
+          completedAt >= weekStart &&
+          completedAt <= weekEnd;
         if (isCompleted) {
           completed++;
           pointsDone += pts;

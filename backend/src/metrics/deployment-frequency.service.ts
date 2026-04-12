@@ -79,7 +79,7 @@ export class DeploymentFrequencyService {
     })).filter((i) => isWorkItem(i.issueType));
 
     const noVersionKeys = allBoardIssues
-      .filter((i) => i.fixVersion === null && !versionIssueKeys.has(i.key))
+      .filter((i) => !i.fixVersion && !versionIssueKeys.has(i.key))
       .map((i) => i.key);
 
     let transitionKeys = new Set<string>();
