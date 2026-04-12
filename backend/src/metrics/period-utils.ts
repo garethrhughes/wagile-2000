@@ -31,9 +31,14 @@ export function quarterToDates(quarter: string, tz = 'UTC'): QuarterDates {
   const startMonth = (q - 1) * 3; // 0-indexed
 
   const startDate = midnightInTz(year, startMonth, 1, tz);
-  // Last day of quarter: month startMonth+3 day 0 = last day of month startMonth+2
-  const endDate = midnightInTz(year, startMonth + 3, 0, tz);
-  endDate.setUTCHours(23, 59, 59, 999);
+  // Last day of quarter: first day of the next quarter minus one day.
+  // We compute the next-quarter start in UTC first, then subtract one millisecond
+  // so endDate lands at 23:59:59.999 on the last day of the quarter in tz.
+  const nextQStartMonth = startMonth + 3; // may be 12 (Jan next year) — Date.UTC handles overflow
+  const nextQYear = nextQStartMonth >= 12 ? year + 1 : year;
+  const nextQMonth = nextQStartMonth >= 12 ? 0 : nextQStartMonth;
+  const nextQStart = midnightInTz(nextQYear, nextQMonth, 1, tz);
+  const endDate = new Date(nextQStart.getTime() - 1); // 23:59:59.999 last day of quarter
 
   return { label: quarter, startDate, endDate };
 }

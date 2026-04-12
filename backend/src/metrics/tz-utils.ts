@@ -31,6 +31,18 @@ export function midnightInTz(
   day: number,
   tz: string,
 ): Date {
+  // day=0 means "last day of the previous month" in JavaScript Date semantics,
+  // but an ISO string with day "00" is invalid. Normalise before building the string.
+  if (day === 0) {
+    month -= 1;
+    if (month < 0) {
+      month = 11;
+      year -= 1;
+    }
+    // Last day of the (now decremented) month: use Date.UTC overflow to resolve
+    day = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  }
+
   // Form the target local ISO string (no zone suffix — will be treated as UTC approximation)
   const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00`;
   // Use UTC as the initial candidate
