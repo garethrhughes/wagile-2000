@@ -229,9 +229,9 @@ function rowClassName(row: WeekDetailIssue): string {
 // ---------------------------------------------------------------------------
 
 function getBackLabel(from: string | null): string {
-  if (from === 'roadmap') return '← Back to Roadmap'
-  if (from === 'planning') return '← Planning'
-  return '← Planning'
+  if (from === 'roadmap') return 'Back to Roadmap'
+  if (from === 'planning') return 'Planning'
+  return 'Planning'
 }
 
 function getBackFallback(from: string | null): string {

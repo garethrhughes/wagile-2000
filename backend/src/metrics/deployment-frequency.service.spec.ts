@@ -122,14 +122,18 @@ describe('DeploymentFrequencyService', () => {
     versionRepo.find.mockResolvedValue([]);
 
     const qb = {
+      select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       getCount: jest.fn().mockResolvedValue(5),
+      getRawMany: jest.fn().mockResolvedValue(
+        Array.from({ length: 5 }, (_, i) => ({ issueKey: `ACC-${i + 1}` })),
+      ),
     };
     changelogRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
     issueRepo.find.mockResolvedValue([
-      { key: 'ACC-1' },
-      { key: 'ACC-2' },
+      { key: 'ACC-1', issueType: 'Story', fixVersion: null },
+      { key: 'ACC-2', issueType: 'Story', fixVersion: null },
     ] as JiraIssue[]);
 
     const result = await service.calculate('ACC', start, end);

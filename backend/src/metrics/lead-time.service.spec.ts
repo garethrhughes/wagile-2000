@@ -55,12 +55,13 @@ describe('LeadTimeService', () => {
 
   it('should calculate median lead time from changelogs', async () => {
     const created = new Date('2025-01-01');
+    const inProgress = new Date('2025-01-01T00:01:00Z'); // started almost immediately
     const done = new Date('2025-01-04'); // 3 days later
     const start = new Date('2025-01-01');
     const end = new Date('2025-03-31');
 
     issueRepo.find.mockResolvedValue([
-      { key: 'ACC-1', boardId: 'ACC', createdAt: created, fixVersion: null, labels: [] },
+      { key: 'ACC-1', boardId: 'ACC', issueType: 'Story', createdAt: created, fixVersion: null, labels: [] },
     ] as unknown as JiraIssue[]);
 
     const qb = {
@@ -68,6 +69,7 @@ describe('LeadTimeService', () => {
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([
+        { issueKey: 'ACC-1', field: 'status', toValue: 'In Progress', changedAt: inProgress },
         { issueKey: 'ACC-1', field: 'status', toValue: 'Done', changedAt: done },
       ]),
     };
@@ -76,7 +78,8 @@ describe('LeadTimeService', () => {
 
     const result = await service.calculate('ACC', start, end);
 
-    expect(result.medianDays).toBe(3);
+    // lead time = inProgress → done ≈ 3 days
+    expect(result.medianDays).toBeCloseTo(3, 1);
     expect(result.sampleSize).toBe(1);
     expect(result.band).toBe('high');
   });
@@ -97,7 +100,7 @@ describe('LeadTimeService', () => {
     const end = new Date('2025-03-31');
 
     issueRepo.find.mockResolvedValue([
-      { key: 'PLAT-1', boardId: 'PLAT', createdAt: created, fixVersion: null, labels: [] },
+      { key: 'PLAT-1', boardId: 'PLAT', issueType: 'Story', createdAt: created, fixVersion: null, labels: [] },
     ] as unknown as JiraIssue[]);
 
     const qb = {
@@ -127,6 +130,7 @@ describe('LeadTimeService', () => {
     const issues = Array.from({ length: 20 }, (_, i) => ({
       key: `ACC-${i + 1}`,
       boardId: 'ACC',
+      issueType: 'Story',
       createdAt: new Date('2025-01-01'),
       fixVersion: null,
       labels: [],
@@ -134,12 +138,21 @@ describe('LeadTimeService', () => {
 
     issueRepo.find.mockResolvedValue(issues as unknown as JiraIssue[]);
 
-    const changelogs = issues.map((issue, i) => ({
-      issueKey: issue.key,
-      field: 'status',
-      toValue: 'Done',
-      changedAt: new Date(new Date('2025-01-01').getTime() + (i + 1) * 24 * 60 * 60 * 1000),
-    }));
+    // Each issue gets an In Progress then Done transition; lead time = (i+1) days
+    const changelogs = issues.flatMap((issue, i) => [
+      {
+        issueKey: issue.key,
+        field: 'status',
+        toValue: 'In Progress',
+        changedAt: new Date('2025-01-01T01:00:00Z'),
+      },
+      {
+        issueKey: issue.key,
+        field: 'status',
+        toValue: 'Done',
+        changedAt: new Date(new Date('2025-01-01').getTime() + (i + 1) * 24 * 60 * 60 * 1000),
+      },
+    ]);
 
     const qb = {
       where: jest.fn().mockReturnThis(),

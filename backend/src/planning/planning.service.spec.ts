@@ -86,13 +86,16 @@ describe('PlanningService', () => {
         goal: '',
       } as JiraSprint;
 
-      sprintRepo.find.mockResolvedValue([sprint]);
+      // find is called twice: once for active sprints (empty), once for closed sprints
+      sprintRepo.find
+        .mockResolvedValueOnce([])         // active sprints
+        .mockResolvedValueOnce([sprint]);  // closed sprints
 
       // All board issues (includes issues from this sprint)
       issueRepo.find.mockResolvedValue([
-        { key: 'ACC-1', sprintId: 'sprint-1', status: 'Done', boardId: 'ACC', createdAt: new Date('2025-01-01') },
-        { key: 'ACC-2', sprintId: 'sprint-1', status: 'Done', boardId: 'ACC', createdAt: new Date('2025-01-01') },
-        { key: 'ACC-3', sprintId: 'sprint-1', status: 'In Progress', boardId: 'ACC', createdAt: new Date('2025-01-01') },
+        { key: 'ACC-1', sprintId: 'sprint-1', status: 'Done', boardId: 'ACC', issueType: 'Story', points: null, createdAt: new Date('2025-01-01') },
+        { key: 'ACC-2', sprintId: 'sprint-1', status: 'Done', boardId: 'ACC', issueType: 'Story', points: null, createdAt: new Date('2025-01-01') },
+        { key: 'ACC-3', sprintId: 'sprint-1', status: 'In Progress', boardId: 'ACC', issueType: 'Story', points: null, createdAt: new Date('2025-01-01') },
       ] as unknown as JiraIssue[]);
 
       let qbCallCount = 0;
@@ -176,11 +179,14 @@ describe('PlanningService', () => {
         goal: '',
       } as JiraSprint;
 
-      sprintRepo.find.mockResolvedValue([sprint]);
+      // find is called twice: once for active sprints (empty), once for closed sprints
+      sprintRepo.find
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([sprint]);
 
       issueRepo.find.mockResolvedValue([
-        { key: 'ACC-10', sprintId: 'sprint-2', status: 'Done', boardId: 'ACC', createdAt: new Date('2025-01-01') },
-        { key: 'ACC-11', sprintId: 'sprint-2', status: 'Done', boardId: 'ACC', createdAt: new Date('2025-01-01') },
+        { key: 'ACC-10', sprintId: 'sprint-2', status: 'Done', boardId: 'ACC', issueType: 'Story', points: null, createdAt: new Date('2025-01-01') },
+        { key: 'ACC-11', sprintId: 'sprint-2', status: 'Done', boardId: 'ACC', issueType: 'Story', points: null, createdAt: new Date('2025-01-01') },
       ] as unknown as JiraIssue[]);
 
       let qbCallCount = 0;
@@ -291,6 +297,279 @@ describe('PlanningService', () => {
       const result = await service.getQuarters();
 
       expect(result).toEqual([]);
+    });
+
+    it('should skip sprints with no startDate', async () => {
+      sprintRepo.find.mockResolvedValue([
+        { id: 's1', state: 'closed', startDate: null } as unknown as JiraSprint,
+        { id: 's2', state: 'closed', startDate: new Date('2025-01-10') } as unknown as JiraSprint,
+      ]);
+
+      const result = await service.getQuarters();
+      expect(result).toHaveLength(1);
+      expect(result[0].quarter).toBe('2025-Q1');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getAccuracy — sprintId path
+  // -------------------------------------------------------------------------
+
+  describe('getAccuracy with sprintId', () => {
+    it('returns accuracy for a single sprint by id', async () => {
+      const sprint: JiraSprint = {
+        id: 'sprint-5',
+        name: 'Sprint 5',
+        boardId: 'ACC',
+        state: 'closed',
+        startDate: new Date('2026-01-06'),
+        endDate: new Date('2026-01-20'),
+        goal: '',
+      } as JiraSprint;
+
+      sprintRepo.findOne.mockResolvedValue(sprint);
+      issueRepo.find.mockResolvedValue([]);
+
+      const result = await service.getAccuracy('ACC', 'sprint-5');
+
+      expect(sprintRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'sprint-5', boardId: 'ACC' },
+      });
+      expect(result).toHaveLength(1);
+      expect(result[0].sprintId).toBe('sprint-5');
+    });
+
+    it('returns empty array when sprintId not found', async () => {
+      sprintRepo.findOne.mockResolvedValue(null);
+      const result = await service.getAccuracy('ACC', 'nonexistent');
+      expect(result).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getAccuracy — quarter path
+  // -------------------------------------------------------------------------
+
+  describe('getAccuracy with quarter', () => {
+    it('uses createQueryBuilder to fetch sprints in quarter date range', async () => {
+      const qbMock = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      };
+      sprintRepo.createQueryBuilder = jest.fn().mockReturnValue(qbMock);
+
+      const result = await service.getAccuracy('ACC', undefined, '2026-Q1');
+
+      expect(sprintRepo.createQueryBuilder).toHaveBeenCalled();
+      expect(result).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getKanbanQuarters
+  // -------------------------------------------------------------------------
+
+  describe('getKanbanQuarters', () => {
+    it('throws BadRequestException when board is not Kanban', async () => {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'ACC',
+        boardType: 'scrum',
+      } as unknown as BoardConfig);
+
+      await expect(service.getKanbanQuarters('ACC')).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when no board config exists', async () => {
+      boardConfigRepo.findOne.mockResolvedValue(null);
+      await expect(service.getKanbanQuarters('PLAT')).rejects.toThrow(BadRequestException);
+    });
+
+    it('returns empty array when kanban board has no issues', async () => {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'PLAT',
+        boardType: 'kanban',
+        doneStatusNames: ['Done'],
+        backlogStatusIds: [],
+        dataStartDate: null,
+      } as unknown as BoardConfig);
+      issueRepo.find.mockResolvedValue([]);
+
+      const result = await service.getKanbanQuarters('PLAT');
+      expect(result).toEqual([]);
+    });
+
+    it('returns empty array when all issues are backlog (no status changelogs)', async () => {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'PLAT',
+        boardType: 'kanban',
+        doneStatusNames: ['Done'],
+        backlogStatusIds: [],
+        dataStartDate: null,
+      } as unknown as BoardConfig);
+      issueRepo.find.mockResolvedValue([
+        { key: 'PLAT-1', boardId: 'PLAT', issueType: 'Story', summary: 'S', status: 'To Do',
+          labels: [], epicKey: null, fixVersion: null, sprintId: null, createdAt: new Date('2026-01-05T00:00:00Z'),
+          priority: null, points: null, statusId: null } as unknown as JiraIssue,
+      ]);
+
+      let qbCallCount = 0;
+      changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+        qbCallCount++;
+        const qb = {
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          select: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([]),
+          getRawMany: jest.fn().mockResolvedValue([]),
+        };
+        return qb;
+      });
+
+      const result = await service.getKanbanQuarters('PLAT');
+      expect(result).toEqual([]);
+    });
+
+    it('groups issues into quarters by board-entry date', async () => {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'PLAT',
+        boardType: 'kanban',
+        doneStatusNames: ['Done'],
+        backlogStatusIds: [],
+        dataStartDate: null,
+      } as unknown as BoardConfig);
+
+      issueRepo.find.mockResolvedValue([
+        { key: 'PLAT-1', boardId: 'PLAT', issueType: 'Story', summary: 'S', status: 'Done',
+          labels: [], epicKey: null, fixVersion: null, sprintId: null, createdAt: new Date('2026-01-01T00:00:00Z'),
+          priority: null, points: null, statusId: null } as unknown as JiraIssue,
+      ]);
+
+      let qbCallCount = 0;
+      changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+        qbCallCount++;
+        const qb = {
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          select: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([]),
+          getRawMany: jest.fn().mockResolvedValue([]),
+        };
+
+        if (qbCallCount === 1) {
+          // Call 1: "To Do" exit changelogs (board-entry date)
+          qb.getMany.mockResolvedValue([
+            { issueKey: 'PLAT-1', field: 'status', fromValue: 'To Do', toValue: 'In Progress',
+              changedAt: new Date('2026-01-10T09:00:00Z') },
+          ]);
+        } else if (qbCallCount === 2) {
+          // Call 2: DISTINCT issueKey query (backlogStatusIds is empty, uses getRawMany)
+          qb.getRawMany.mockResolvedValue([{ issueKey: 'PLAT-1' }]);
+        } else if (qbCallCount === 3) {
+          // Call 3: done-transition changelogs
+          qb.getMany.mockResolvedValue([
+            { issueKey: 'PLAT-1', field: 'status', fromValue: 'In Progress', toValue: 'Done',
+              changedAt: new Date('2026-01-20T09:00:00Z') },
+          ]);
+        }
+        return qb;
+      });
+
+      const result = await service.getKanbanQuarters('PLAT');
+      expect(result).toHaveLength(1);
+      expect(result[0].quarter).toBe('2026-Q1');
+      expect(result[0].issuesPulledIn).toBe(1);
+      expect(result[0].completed).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getKanbanWeeks
+  // -------------------------------------------------------------------------
+
+  describe('getKanbanWeeks', () => {
+    it('throws BadRequestException when board is not Kanban', async () => {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'ACC',
+        boardType: 'scrum',
+      } as unknown as BoardConfig);
+
+      await expect(service.getKanbanWeeks('ACC')).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when no board config exists', async () => {
+      boardConfigRepo.findOne.mockResolvedValue(null);
+      await expect(service.getKanbanWeeks('PLAT')).rejects.toThrow(BadRequestException);
+    });
+
+    it('returns empty array when kanban board has no issues', async () => {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'PLAT',
+        boardType: 'kanban',
+        doneStatusNames: ['Done'],
+        backlogStatusIds: [],
+        dataStartDate: null,
+      } as unknown as BoardConfig);
+      issueRepo.find.mockResolvedValue([]);
+
+      const result = await service.getKanbanWeeks('PLAT');
+      expect(result).toEqual([]);
+    });
+
+    it('groups issues into weeks by board-entry date', async () => {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'PLAT',
+        boardType: 'kanban',
+        doneStatusNames: ['Done'],
+        backlogStatusIds: [],
+        dataStartDate: null,
+      } as unknown as BoardConfig);
+
+      issueRepo.find.mockResolvedValue([
+        { key: 'PLAT-1', boardId: 'PLAT', issueType: 'Story', summary: 'S', status: 'Done',
+          labels: [], epicKey: null, fixVersion: null, sprintId: null, createdAt: new Date('2026-01-01T00:00:00Z'),
+          priority: null, points: null, statusId: null } as unknown as JiraIssue,
+      ]);
+
+      let qbCallCount = 0;
+      changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+        qbCallCount++;
+        const qb = {
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          select: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([]),
+          getRawMany: jest.fn().mockResolvedValue([]),
+        };
+
+        if (qbCallCount === 1) {
+          // Call 1: "To Do" exit changelogs (board-entry date) — issue entered in W02 2026
+          qb.getMany.mockResolvedValue([
+            { issueKey: 'PLAT-1', field: 'status', fromValue: 'To Do', toValue: 'In Progress',
+              changedAt: new Date('2026-01-06T09:00:00Z') },
+          ]);
+        } else if (qbCallCount === 2) {
+          // Call 2: DISTINCT issueKey query (backlogStatusIds is empty, uses getRawMany)
+          qb.getRawMany.mockResolvedValue([{ issueKey: 'PLAT-1' }]);
+        } else if (qbCallCount === 3) {
+          // Call 3: done-transition changelogs
+          qb.getMany.mockResolvedValue([
+            { issueKey: 'PLAT-1', field: 'status', fromValue: 'In Progress', toValue: 'Done',
+              changedAt: new Date('2026-01-08T09:00:00Z') },
+          ]);
+        }
+        return qb;
+      });
+
+      const result = await service.getKanbanWeeks('PLAT');
+      expect(result).toHaveLength(1);
+      expect(result[0].week).toBe('2026-W02');
+      expect(result[0].issuesPulledIn).toBe(1);
+      expect(result[0].completed).toBe(1);
     });
   });
 });

@@ -192,9 +192,9 @@ function rowClassName(row: SprintDetailIssue): string {
 // ---------------------------------------------------------------------------
 
 function getBackLabel(from: string | null): string {
-  if (from === 'planning') return '← Planning'
-  if (from === 'roadmap') return '← Roadmap'
-  return '← Planning'
+  if (from === 'planning') return 'Planning'
+  if (from === 'roadmap') return 'Roadmap'
+  return 'Planning'
 }
 
 function getBackFallback(from: string | null): string {

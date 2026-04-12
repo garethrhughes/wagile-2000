@@ -56,6 +56,7 @@ describe('MttrService', () => {
       incidentIssueTypes: ['Bug', 'Incident'],
       recoveryStatusNames: ['Done', 'Resolved'],
       incidentLabels: [],
+      incidentPriorities: [],
       inProgressStatusNames: ['In Progress'],
       dataStartDate: null,
     } as unknown as BoardConfig);
@@ -67,6 +68,7 @@ describe('MttrService', () => {
         boardId: 'ACC',
         issueType: 'Bug',
         labels: [],
+        priority: null,
         createdAt: new Date('2025-01-10T00:00:00Z'),
       },
       {
@@ -74,6 +76,7 @@ describe('MttrService', () => {
         boardId: 'ACC',
         issueType: 'Incident',
         labels: [],
+        priority: null,
         createdAt: new Date('2025-02-01T00:00:00Z'),
       },
       {
@@ -81,6 +84,7 @@ describe('MttrService', () => {
         boardId: 'ACC',
         issueType: 'Story',
         labels: [],
+        priority: null,
         createdAt: new Date('2025-01-01T00:00:00Z'),
       },
     ] as unknown as JiraIssue[]);
@@ -125,6 +129,7 @@ describe('MttrService', () => {
       incidentIssueTypes: [],
       recoveryStatusNames: ['Done'],
       incidentLabels: ['production-incident'],
+      incidentPriorities: [],
       inProgressStatusNames: ['In Progress'],
       dataStartDate: null,
     } as unknown as BoardConfig);
@@ -135,6 +140,7 @@ describe('MttrService', () => {
         boardId: 'ACC',
         issueType: 'Story',
         labels: ['production-incident'],
+        priority: null,
         createdAt: new Date('2025-01-10T00:00:00Z'),
       },
       {
@@ -142,6 +148,7 @@ describe('MttrService', () => {
         boardId: 'ACC',
         issueType: 'Story',
         labels: [],
+        priority: null,
         createdAt: new Date('2025-01-15T00:00:00Z'),
       },
     ] as unknown as JiraIssue[]);
