@@ -27,7 +27,7 @@ export function Sidebar() {
       {/* Brand */}
       <div className="flex items-center gap-2 px-5 py-6">
         <BarChart3 className="h-7 w-7 text-squirrel-500" />
-        <span className="text-lg font-bold tracking-tight text-text-primary">Wagile</span>
+        <span className="text-lg font-bold tracking-tight text-text-primary">Fragile</span>
       </div>
 
       {/* Navigation */}

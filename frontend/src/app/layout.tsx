@@ -7,8 +7,14 @@ const geistSans = Geist({ subsets: ['latin'], variable: '--font-geist-sans' });
 const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-mono' });
 
 export const metadata: Metadata = {
-  title: 'Wagile',
-  description: 'Wagile — Jira DORA & planning metrics',
+  title: {
+    default: 'Fragile',
+    template: '%s — Fragile',
+  },
+  description: 'Fragile — Jira DORA & planning metrics',
+  icons: {
+    icon: '/favicon.svg',
+  },
 };
 
 export default function RootLayout({
