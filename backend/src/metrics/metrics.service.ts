@@ -238,6 +238,10 @@ export class MetricsService {
     const ltMedian = percentile(allLtObs, 50);
     const ltP95 = percentile(allLtObs, 95);
     const ltContributing = boardResults.filter((r) => r.ltObs.length > 0).length;
+    const ltAnomalyTotal = boardResults.reduce(
+      (sum, r) => sum + r.lt.anomalyCount,
+      0,
+    );
 
     // --- Org-level CFR: ratio of sums
     const totalFailures = boardResults.reduce(
@@ -306,6 +310,7 @@ export class MetricsService {
         band: classifyLeadTime(ltMedian),
         sampleSize: allLtObs.length,
         contributingBoards: ltContributing,
+        anomalyCount: ltAnomalyTotal,
       },
       orgChangeFailureRate: {
         totalDeployments: totalDeplForCfr,

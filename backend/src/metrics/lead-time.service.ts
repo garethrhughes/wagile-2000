@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import {
@@ -23,6 +23,8 @@ export interface LeadTimeResult {
 
 @Injectable()
 export class LeadTimeService {
+  private readonly logger = new Logger(LeadTimeService.name);
+
   constructor(
     @InjectRepository(JiraIssue)
     private readonly issueRepo: Repository<JiraIssue>,
@@ -36,8 +38,9 @@ export class LeadTimeService {
 
   /**
    * Returns the raw sorted lead-time-days observations for a board/period,
-   * plus a count of anomalous (negative or zero-day) observations that were
-   * excluded.
+   * plus a count of anomalous issues that were excluded: issues that had a
+   * done-transition within the window but lacked any prior in-progress
+   * transition (no work-started evidence).
    * Used by MetricsService.getDoraAggregate() for pooled-median computation.
    */
   async getLeadTimeObservations(
@@ -127,26 +130,18 @@ export class LeadTimeService {
     for (const issue of issues) {
       const issueLogs = changelogsByIssue.get(issue.key) ?? [];
 
-      // Determine start time.
-      // For both Scrum and Kanban: prefer the first transition to an
-      // "in progress" status (board-config-aware; defaults to ["In Progress"]).
-      // Issues with no such transition are skipped entirely — they have no
-      // meaningful cycle-time start and must not pollute the distribution.
-      const inProgressTransition = issueLogs.find(
-        (cl) => cl.toValue !== null && inProgressNames.includes(cl.toValue),
-      );
-      if (!inProgressTransition) {
-        continue; // skip: no work-started evidence for either board type
-      }
-      const startTime: Date = inProgressTransition.changedAt;
-
-      // Determine end time: first done/released transition in the period
-      const doneTransition = issueLogs.find(
-        (cl) =>
-          doneStatuses.includes(cl.toValue ?? '') &&
-          cl.changedAt >= startDate &&
-          cl.changedAt <= endDate,
-      );
+      // Determine end time first — only issues completed in this period are
+      // relevant. Issues with no done-transition in the window are simply not
+      // part of this period and must not pollute any count.
+      // Use the LAST done transition in the period (issue may be re-opened).
+      const doneTransition = issueLogs
+        .filter(
+          (cl) =>
+            doneStatuses.includes(cl.toValue ?? '') &&
+            cl.changedAt >= startDate &&
+            cl.changedAt <= endDate,
+        )
+        .at(-1);
 
       let endTime: Date | null = null;
 
@@ -166,13 +161,26 @@ export class LeadTimeService {
 
       if (!endTime) continue;
 
+      // Determine start time: first transition to an in-progress status.
+      // If no such transition exists the issue was completed in-window but
+      // has no work-started evidence — window-scoped anomaly.
+      const inProgressTransition = issueLogs.find(
+        (cl) => cl.toValue !== null && inProgressNames.includes(cl.toValue),
+      );
+      if (!inProgressTransition) {
+        anomalyCount++;
+        continue;
+      }
+      const startTime: Date = inProgressTransition.changedAt;
+
       const days =
         (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60 * 24);
-      if (days >= 0) {
-        leadTimeDays.push(days);
-      } else {
-        anomalyCount++;
+      if (days < 0) {
+        this.logger.warn(
+          `Negative lead time for ${issue.key}: ${days.toFixed(2)} days — clamping to 0`,
+        );
       }
+      leadTimeDays.push(Math.max(0, days));
     }
 
     leadTimeDays.sort((a, b) => a - b);

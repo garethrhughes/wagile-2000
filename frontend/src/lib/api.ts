@@ -593,6 +593,8 @@ export interface OrgLeadTimeResult {
   band: DoraBand
   sampleSize: number
   contributingBoards: number
+  /** Issues completed in-window but excluded because no in-progress transition was found */
+  anomalyCount: number
 }
 
 export interface OrgCfrResult {

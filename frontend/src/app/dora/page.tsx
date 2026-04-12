@@ -369,6 +369,22 @@ export default function DoraPage() {
           </div>
         )}
 
+      {/* Amber banner for lead time anomalies */}
+      {pageState.status === 'ready' &&
+        pageState.aggregate.orgLeadTime.anomalyCount > 0 && (
+          <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <p className="text-sm text-amber-700">
+              <span className="font-semibold">
+                {pageState.aggregate.orgLeadTime.anomalyCount} issue
+                {pageState.aggregate.orgLeadTime.anomalyCount !== 1 ? 's' : ''} excluded
+              </span>{' '}
+              from Lead Time — no &quot;In Progress&quot; transition found; these issues
+              are omitted from percentile calculations.
+            </p>
+          </div>
+        )}
+
       {/* Loading */}
       {pageState.status === 'loading' && (
         <div className="flex items-center justify-center py-16">

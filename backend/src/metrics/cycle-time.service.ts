@@ -183,22 +183,10 @@ export class CycleTimeService {
     for (const issue of issues) {
       const issueLogs = changelogsByIssue.get(issue.key) ?? [];
 
-      // Step (a): cycleStart = FIRST changelog where toValue ∈ inProgressStatusNames
-      const inProgressTransition = issueLogs.find(
-        (cl) => inProgressNames.includes(cl.toValue ?? ''),
-      );
-
-      if (!inProgressTransition) {
-        // Issue 1 + proposal §1.3: no in-progress transition — mark as anomaly,
-        // include in anomalyCount but exclude from percentile calculation.
-        // We still continue rather than creating an observation with dummy times.
-        anomalyCount++;
-        continue;
-      }
-
-      const cycleStart = inProgressTransition.changedAt;
-
-      // Step (b): cycleEnd = LAST done transition in period
+      // Step (a): determine cycleEnd first — only issues completed in this
+      // period are relevant. Issues with no done-transition in the window are
+      // simply not part of this period and must not pollute any count.
+      // cycleEnd = LAST done transition in period
       // An issue may be re-opened and re-resolved; we want the most recent
       // resolution within the period, not the first.
       const doneTransition = issueLogs
@@ -227,9 +215,23 @@ export class CycleTimeService {
       }
 
       if (!cycleEnd) {
-        // Issue not completed in this period — skip entirely
+        // Issue not completed in this period — not relevant, skip entirely
         continue;
       }
+
+      // Step (b): cycleStart = FIRST changelog where toValue ∈ inProgressStatusNames
+      const inProgressTransition = issueLogs.find(
+        (cl) => inProgressNames.includes(cl.toValue ?? ''),
+      );
+
+      if (!inProgressTransition) {
+        // Issue completed in this period but has no in-progress transition —
+        // window-scoped anomaly: count it and exclude from percentile calculation.
+        anomalyCount++;
+        continue;
+      }
+
+      const cycleStart = inProgressTransition.changedAt;
 
       // Step (c): compute cycle time, clamp negative values (data anomaly)
       const rawDays =
