@@ -131,17 +131,136 @@ export class RoadmapService {
       return [];
     }
 
-    // M3: bulk-load all issues for all sprints in one query
-    const sprintIds = sprints.map((s) => s.id);
-    const allIssues = await this.issueRepo.find({
-      where: { sprintId: In(sprintIds), boardId },
-    });
-    const issuesBySprint = new Map<string, JiraIssue[]>();
-    for (const issue of allIssues) {
-      if (!issue.sprintId) continue;
-      const list = issuesBySprint.get(issue.sprintId) ?? [];
-      list.push(issue);
-      issuesBySprint.set(issue.sprintId, list);
+    // Load ALL board issues — we cannot rely on the sprintId column because
+    // Jira only stores the *current* sprint on an issue.  Issues from recently-
+    // closed sprints will have had their sprintId updated to the active sprint
+    // by the last sync, making a WHERE sprintId IN (...) query miss them entirely.
+    const allBoardIssues = (await this.issueRepo.find({ where: { boardId } })).filter(
+      (i) => isWorkItem(i.issueType),
+    );
+
+    if (allBoardIssues.length === 0) {
+      return this.emptyAccuracyForSprints(sprints);
+    }
+
+    const allBoardKeys = allBoardIssues.map((i) => i.key);
+    const issueByKey = new Map<string, JiraIssue>(allBoardIssues.map((i) => [i.key, i]));
+
+    // Bulk-load all Sprint-field changelogs for all board issues in one query
+    const allSprintChangelogs = await this.changelogRepo
+      .createQueryBuilder('cl')
+      .where('cl.issueKey IN (:...keys)', { keys: allBoardKeys })
+      .andWhere('cl.field = :field', { field: 'Sprint' })
+      .orderBy('cl.changedAt', 'ASC')
+      .getMany();
+
+    // Build per-sprint issue sets by replaying Sprint-field changelogs,
+    // using the same algorithm as sprint-detail.service.ts.
+    const sprintSet = new Set(sprints.map((s) => s.id));
+    const sprintByName = new Map<string, JiraSprint>(sprints.map((s) => [s.name, s]));
+    const issuesBySprint = new Map<string, Set<string>>();
+    for (const s of sprints) {
+      issuesBySprint.set(s.id, new Set<string>());
+    }
+
+    // Group changelogs by issue key for efficient per-issue replay
+    const changelogsByIssue = new Map<string, typeof allSprintChangelogs>();
+    for (const cl of allSprintChangelogs) {
+      const list = changelogsByIssue.get(cl.issueKey) ?? [];
+      list.push(cl);
+      changelogsByIssue.set(cl.issueKey, list);
+    }
+
+    // For each board issue, figure out which target sprints it belongs to
+    for (const issue of allBoardIssues) {
+      const logs = changelogsByIssue.get(issue.key) ?? [];
+
+      // Collect names of all target sprints this issue ever appeared in
+      // via changelogs — also handle issues with no changelogs (assigned at creation)
+      const sprintNamesToCheck = new Set<string>();
+
+      // Issues currently assigned to a target sprint but with no sprint changelog
+      // were created directly into that sprint
+      if (
+        issue.sprintId !== null &&
+        sprintSet.has(issue.sprintId) &&
+        logs.length === 0
+      ) {
+        const sprint = sprints.find((s) => s.id === issue.sprintId);
+        if (sprint) {
+          issuesBySprint.get(sprint.id)!.add(issue.key);
+        }
+        continue;
+      }
+
+      // Collect sprint names referenced in changelogs that correspond to our target sprints
+      for (const cl of logs) {
+        for (const sprint of sprints) {
+          if (
+            sprintValueContainsName(cl.fromValue, sprint.name) ||
+            sprintValueContainsName(cl.toValue, sprint.name)
+          ) {
+            sprintNamesToCheck.add(sprint.name);
+          }
+        }
+      }
+
+      // For each referenced target sprint, replay the changelog to determine
+      // whether the issue was a member at any point during that sprint window
+      for (const sprintName of sprintNamesToCheck) {
+        const sprint = sprintByName.get(sprintName);
+        if (!sprint) continue;
+
+        const sprintStart = sprint.startDate;
+        const sprintEnd = sprint.endDate ?? new Date();
+
+        if (!sprintStart) {
+          // No start date: include if any changelog mentions this sprint
+          issuesBySprint.get(sprint.id)!.add(issue.key);
+          continue;
+        }
+
+        const effectiveStart = new Date(sprintStart.getTime() + ROADMAP_GRACE_PERIOD_MS);
+
+        // Determine state at sprint start
+        let inSprintAtStart = wasInSprintByName(logs, sprintName, sprintStart);
+        let inSprintAtEnd = inSprintAtStart;
+
+        for (const cl of logs) {
+          if (cl.changedAt <= sprintStart) continue;
+          if (cl.changedAt > sprintEnd) break;
+
+          if (sprintValueContainsName(cl.toValue, sprintName)) {
+            inSprintAtEnd = true;
+          }
+          if (
+            sprintValueContainsName(cl.fromValue, sprintName) &&
+            !sprintValueContainsName(cl.toValue, sprintName)
+          ) {
+            inSprintAtEnd = false;
+          }
+        }
+
+        // Also handle issues created directly into the sprint after grace period
+        const createdMidSprint =
+          logs.length > 0 &&
+          issue.createdAt > effectiveStart &&
+          issue.createdAt <= sprintEnd &&
+          !inSprintAtStart;
+
+        if (inSprintAtStart || inSprintAtEnd || createdMidSprint) {
+          issuesBySprint.get(sprint.id)!.add(issue.key);
+        }
+      }
+    }
+
+    // Materialise issue lists per sprint
+    const issueListBySprint = new Map<string, JiraIssue[]>();
+    for (const [sid, keySet] of issuesBySprint) {
+      issueListBySprint.set(
+        sid,
+        [...keySet].map((k) => issueByKey.get(k)!).filter(Boolean),
+      );
     }
 
     // Load all roadmap ideas once — filter per-sprint in memory
@@ -149,7 +268,7 @@ export class RoadmapService {
 
     const results: RoadmapSprintAccuracy[] = [];
     for (const sprint of sprints) {
-      const sprintIssues = issuesBySprint.get(sprint.id) ?? [];
+      const sprintIssues = issueListBySprint.get(sprint.id) ?? [];
       const accuracy = await this.calculateSprintAccuracy(
         sprint,
         sprintIssues,
@@ -884,4 +1003,61 @@ export class RoadmapService {
     await this.syncService.syncRoadmaps();
     return { message: 'Roadmap sync completed' };
   }
+
+  private emptyAccuracyForSprints(sprints: JiraSprint[]): RoadmapSprintAccuracy[] {
+    return sprints.map((s) => this.emptyAccuracy(s));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Module-level constants
+// ---------------------------------------------------------------------------
+
+/** Grace period matching PlanningService — absorbs Jira's bulk-add delay */
+const ROADMAP_GRACE_PERIOD_MS = 5 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// Pure helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true if `sprintName` appears as an exact token in a comma-separated
+ * Sprint field value (prevents "Sprint 1" matching "Sprint 10").
+ */
+function sprintValueContainsName(
+  value: string | null,
+  sprintName: string,
+): boolean {
+  if (!value) return false;
+  return value.split(',').some((s) => s.trim() === sprintName);
+}
+
+/**
+ * Replay Sprint-field changelogs to determine whether an issue was in
+ * `sprintName` at or just after `date` (using a 5-minute grace period).
+ * Returns true for issues with no changelogs (assigned at creation).
+ */
+function wasInSprintByName(
+  sprintChangelogs: { changedAt: Date; fromValue: string | null; toValue: string | null }[],
+  sprintName: string,
+  date: Date,
+): boolean {
+  const effectiveDate = new Date(date.getTime() + ROADMAP_GRACE_PERIOD_MS);
+  let inSprint = false;
+
+  for (const cl of sprintChangelogs) {
+    if (cl.changedAt > effectiveDate) break;
+    if (sprintValueContainsName(cl.toValue, sprintName)) {
+      inSprint = true;
+    }
+    if (
+      sprintValueContainsName(cl.fromValue, sprintName) &&
+      !sprintValueContainsName(cl.toValue, sprintName)
+    ) {
+      inSprint = false;
+    }
+  }
+
+  if (sprintChangelogs.length === 0) return true;
+  return inSprint;
 }
