@@ -183,10 +183,15 @@ export class CycleTimeService {
     for (const issue of issues) {
       const issueLogs = changelogsByIssue.get(issue.key) ?? [];
 
-      // Step (a): determine cycleEnd first — only issues completed in this
-      // period are relevant. Issues with no done-transition in the window are
-      // simply not part of this period and must not pollute any count.
-      // cycleEnd = LAST done transition in period
+      // Step (a): cycleStart = FIRST changelog where toValue ∈ inProgressStatusNames.
+      // Resolved up front so the fixVersion fallback can guard against release
+      // dates that pre-date the work start (e.g. version released before the
+      // issue moved to In Progress).
+      const inProgressTransition = issueLogs.find(
+        (cl) => inProgressNames.includes(cl.toValue ?? ''),
+      );
+
+      // Step (b): cycleEnd = LAST done transition in period.
       // An issue may be re-opened and re-resolved; we want the most recent
       // resolution within the period, not the first.
       const doneTransition = issueLogs
@@ -203,12 +208,16 @@ export class CycleTimeService {
       if (doneTransition) {
         cycleEnd = doneTransition.changedAt;
       } else if (issue.fixVersion) {
-        // Fallback: fixVersion releaseDate in period
+        // Fallback: fixVersion releaseDate in period, but only if it is not
+        // earlier than the in-progress transition — a release date that precedes
+        // work starting produces a nonsensical negative duration.
         const releaseDate = versionDateMap.get(issue.fixVersion);
         if (
           releaseDate &&
           releaseDate >= startDate &&
-          releaseDate <= endDate
+          releaseDate <= endDate &&
+          (inProgressTransition === undefined ||
+            releaseDate >= inProgressTransition.changedAt)
         ) {
           cycleEnd = releaseDate;
         }
@@ -218,11 +227,6 @@ export class CycleTimeService {
         // Issue not completed in this period — not relevant, skip entirely
         continue;
       }
-
-      // Step (b): cycleStart = FIRST changelog where toValue ∈ inProgressStatusNames
-      const inProgressTransition = issueLogs.find(
-        (cl) => inProgressNames.includes(cl.toValue ?? ''),
-      );
 
       if (!inProgressTransition) {
         // Issue completed in this period but has no in-progress transition —

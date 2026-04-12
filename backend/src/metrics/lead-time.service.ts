@@ -130,9 +130,12 @@ export class LeadTimeService {
     for (const issue of issues) {
       const issueLogs = changelogsByIssue.get(issue.key) ?? [];
 
-      // Determine end time first — only issues completed in this period are
-      // relevant. Issues with no done-transition in the window are simply not
-      // part of this period and must not pollute any count.
+      // Resolve in-progress start first — needed to guard the fixVersion fallback.
+      const inProgressTransition = issueLogs.find(
+        (cl) => cl.toValue !== null && inProgressNames.includes(cl.toValue),
+      );
+
+      // Determine end time — only issues completed in this period are relevant.
       // Use the LAST done transition in the period (issue may be re-opened).
       const doneTransition = issueLogs
         .filter(
@@ -148,12 +151,17 @@ export class LeadTimeService {
       if (doneTransition) {
         endTime = doneTransition.changedAt;
       } else if (issue.fixVersion) {
-        // Fallback: use version release date
+        // Fallback: use version release date, but only if it is not earlier than
+        // the in-progress transition — a release date that precedes work starting
+        // produces a nonsensical negative duration (e.g. OCS-774: version 3.238
+        // released before the issue moved to In Progress).
         const releaseDate = versionDateMap.get(issue.fixVersion);
         if (
           releaseDate &&
           releaseDate >= startDate &&
-          releaseDate <= endDate
+          releaseDate <= endDate &&
+          (inProgressTransition === undefined ||
+            releaseDate >= inProgressTransition.changedAt)
         ) {
           endTime = releaseDate;
         }
@@ -161,12 +169,8 @@ export class LeadTimeService {
 
       if (!endTime) continue;
 
-      // Determine start time: first transition to an in-progress status.
-      // If no such transition exists the issue was completed in-window but
-      // has no work-started evidence — window-scoped anomaly.
-      const inProgressTransition = issueLogs.find(
-        (cl) => cl.toValue !== null && inProgressNames.includes(cl.toValue),
-      );
+      // If no in-progress transition exists the issue was completed in-window
+      // but has no work-started evidence — window-scoped anomaly.
       if (!inProgressTransition) {
         anomalyCount++;
         continue;
