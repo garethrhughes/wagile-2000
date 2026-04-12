@@ -2,6 +2,8 @@
  * Utilities for working with calendar quarters used by the trend endpoint.
  */
 
+import { dateParts, midnightInTz } from './tz-utils.js';
+
 export interface QuarterDates {
   label: string;    // e.g. "2026-Q1"
   startDate: Date;
@@ -11,8 +13,11 @@ export interface QuarterDates {
 /**
  * Converts a quarter label (e.g. "2026-Q1") to start/end Date objects.
  * Returns the last 90 days as a fallback for invalid input.
+ *
+ * @param quarter - Quarter label in YYYY-QN format
+ * @param tz      - IANA timezone (default 'UTC')
  */
-export function quarterToDates(quarter: string): QuarterDates {
+export function quarterToDates(quarter: string, tz = 'UTC'): QuarterDates {
   const match = quarter.match(/^(\d{4})-Q([1-4])$/);
   if (!match) {
     const endDate = new Date();
@@ -23,13 +28,14 @@ export function quarterToDates(quarter: string): QuarterDates {
 
   const year = parseInt(match[1], 10);
   const q = parseInt(match[2], 10);
-  const startMonth = (q - 1) * 3;
+  const startMonth = (q - 1) * 3; // 0-indexed
 
-  return {
-    label: quarter,
-    startDate: new Date(year, startMonth, 1),
-    endDate: new Date(year, startMonth + 3, 0, 23, 59, 59, 999),
-  };
+  const startDate = midnightInTz(year, startMonth, 1, tz);
+  // Last day of quarter: month startMonth+3 day 0 = last day of month startMonth+2
+  const endDate = midnightInTz(year, startMonth + 3, 0, tz);
+  endDate.setUTCHours(23, 59, 59, 999);
+
+  return { label: quarter, startDate, endDate };
 }
 
 /**
@@ -38,11 +44,13 @@ export function quarterToDates(quarter: string): QuarterDates {
  *
  * E.g. called on 2026-04-11 (Q2 2026) with n=4 returns:
  *   ['2026-Q2', '2026-Q1', '2025-Q4', '2025-Q3']
+ *
+ * @param n  - Number of quarters to return
+ * @param tz - IANA timezone (default 'UTC')
  */
-export function listRecentQuarters(n: number): QuarterDates[] {
+export function listRecentQuarters(n: number, tz = 'UTC'): QuarterDates[] {
   const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth(); // 0-indexed
+  const { year: currentYear, month: currentMonth } = dateParts(now, tz);
   const currentQ = Math.floor(currentMonth / 3) + 1; // 1-4
 
   const result: QuarterDates[] = [];
@@ -51,7 +59,7 @@ export function listRecentQuarters(n: number): QuarterDates[] {
 
   for (let i = 0; i < n; i++) {
     const label = `${year}-Q${q}`;
-    result.push(quarterToDates(label));
+    result.push(quarterToDates(label, tz));
     q -= 1;
     if (q < 1) {
       q = 4;

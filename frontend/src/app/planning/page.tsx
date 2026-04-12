@@ -19,12 +19,10 @@ import {
   getPlanningAccuracy,
   getKanbanQuarters,
   getKanbanWeeks,
-  getRoadmapAccuracy,
-  getRoadmapConfigs,
+  getAppConfig,
   type SprintAccuracy,
   type KanbanQuarterSummary,
   type KanbanWeekSummary,
-  type RoadmapSprintAccuracy,
 } from '@/lib/api'
 import { useBoardsStore } from '@/store/boards-store'
 import { BoardChip } from '@/components/ui/board-chip'
@@ -36,18 +34,30 @@ import { NoBoardsConfigured } from '@/components/ui/no-boards-configured'
 // Quarter helpers
 // ---------------------------------------------------------------------------
 
-function getQuarterKey(isoDate: string | null): string | null {
-  if (!isoDate) return null;
-  const d = new Date(isoDate);
-  if (isNaN(d.getTime())) return null;
-  const q = Math.floor(d.getMonth() / 3) + 1;
-  return `${d.getFullYear()}-Q${q}`;
+function getQuarterKey(isoDate: string | null, tz: string): string | null {
+  if (!isoDate) return null
+  const d = new Date(isoDate)
+  if (isNaN(d.getTime())) return null
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+  })
+  const [year, month] = formatter.format(d).split('-').map(Number)
+  const q = Math.floor((month - 1) / 3) + 1
+  return `${year}-Q${q}`
 }
 
-function getCurrentQuarterKey(): string {
-  const now = new Date();
-  const q = Math.floor(now.getMonth() / 3) + 1;
-  return `${now.getFullYear()}-Q${q}`;
+function getCurrentQuarterKey(tz: string): string {
+  const now = new Date()
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+  })
+  const [year, month] = formatter.format(now).split('-').map(Number)
+  const q = Math.floor((month - 1) / 3) + 1
+  return `${year}-Q${q}`
 }
 
 // ---------------------------------------------------------------------------
@@ -64,18 +74,18 @@ interface QuarterRow {
   completionRate: number;
 }
 
-function groupByQuarter(sprints: SprintAccuracy[]): QuarterRow[] {
+function groupByQuarter(sprints: SprintAccuracy[], tz: string): QuarterRow[] {
   const map = new Map<string, SprintAccuracy[]>();
 
   for (const s of sprints) {
-    const key = getQuarterKey(s.startDate);
+    const key = getQuarterKey(s.startDate, tz);
     if (!key) continue;
     const list = map.get(key) ?? [];
     list.push(s);
     map.set(key, list);
   }
 
-  const currentKey = getCurrentQuarterKey();
+  const currentKey = getCurrentQuarterKey(tz);
 
   const rows: QuarterRow[] = [];
   for (const [quarter, group] of map.entries()) {
@@ -270,11 +280,14 @@ export default function PlanningPage() {
   const [rawData, setRawData] = useState<SprintAccuracy[]>([])
   const [kanbanData, setKanbanData] = useState<KanbanQuarterSummary[]>([])
   const [kanbanWeekData, setKanbanWeekData] = useState<KanbanWeekSummary[]>([])
+  const [timezone, setTimezone] = useState('UTC')
 
-  // Roadmap accuracy summary (board-scoped)
-  const [roadmapData, setRoadmapData] = useState<RoadmapSprintAccuracy[]>([])
-  const [roadmapConfigured, setRoadmapConfigured] = useState(false)
-  const [roadmapLoading, setRoadmapLoading] = useState(false)
+  // Fetch server timezone on mount
+  useEffect(() => {
+    getAppConfig()
+      .then((cfg) => setTimezone(cfg.timezone))
+      .catch(() => { /* fall back to UTC */ })
+  }, [])
 
   const isKanban = kanbanBoardIds.has(selectedBoard)
 
@@ -368,42 +381,8 @@ export default function PlanningPage() {
     };
   }, [selectedBoard, isKanban, kanbanPeriod]);
 
-  // Fetch roadmap accuracy summary for the selected board
-  useEffect(() => {
-    if (boardsStatus !== 'ready') return;
-    let cancelled = false
-    setRoadmapLoading(true)
-    setRoadmapData([])
-
-    // First check if any roadmap configs exist; if not, skip the accuracy fetch
-    getRoadmapConfigs()
-      .then((configs) => {
-        if (!cancelled) setRoadmapConfigured(configs.length > 0)
-        if (configs.length === 0) {
-          return Promise.resolve([] as RoadmapSprintAccuracy[])
-        }
-        const params = isKanban
-          ? { boardId: selectedBoard, weekMode: true }
-          : { boardId: selectedBoard }
-        return getRoadmapAccuracy(params)
-      })
-      .then((res) => {
-        if (!cancelled) setRoadmapData(res ?? [])
-      })
-      .catch(() => {
-        if (!cancelled) setRoadmapData([])
-      })
-      .finally(() => {
-        if (!cancelled) setRoadmapLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [selectedBoard, isKanban, boardsStatus])
-
   // Quarter rows derived client-side from raw sprint data (Scrum)
-  const quarterRows = useMemo(() => groupByQuarter(rawData), [rawData]);
+  const quarterRows = useMemo(() => groupByQuarter(rawData, timezone), [rawData, timezone]);
 
   // ---------------------------------------------------------------------------
   // Scrum summary stats
@@ -455,23 +434,6 @@ export default function PlanningPage() {
       periodLabel: `quarter${kanbanData.length !== 1 ? 's' : ''}`,
     };
   }, [isKanban, kanbanPeriod, kanbanData, kanbanWeekData]);
-
-  // ---------------------------------------------------------------------------
-  // Roadmap accuracy summary stats
-  // ---------------------------------------------------------------------------
-  const { roadmapAvgCoverage, roadmapAvgOnTimeRate, roadmapHasDates } = useMemo(() => {
-    if (roadmapData.length === 0) {
-      return { roadmapAvgCoverage: 0, roadmapAvgOnTimeRate: 0, roadmapHasDates: false }
-    }
-    const hasDates = roadmapData.some((r) => r.coveredIssues > 0)
-    const totalCoverage = roadmapData.reduce((s, r) => s + r.roadmapCoverage, 0)
-    const totalOnTime = roadmapData.reduce((s, r) => s + r.roadmapOnTimeRate, 0)
-    return {
-      roadmapAvgCoverage: totalCoverage / roadmapData.length,
-      roadmapAvgOnTimeRate: totalOnTime / roadmapData.length,
-      roadmapHasDates: hasDates,
-    }
-  }, [roadmapData])
 
   // ---------------------------------------------------------------------------
   // Chart data
@@ -942,79 +904,6 @@ export default function PlanningPage() {
           }
         />
       )}
-
-      {/* Roadmap Accuracy summary — shown always (independent of planning data state) */}
-      <div className="rounded-xl border border-border bg-card p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">Roadmap Accuracy</h2>
-            <p className="mt-0.5 text-sm text-muted">
-              Sprint work aligned to JPD roadmap items
-            </p>
-          </div>
-          <Link
-            href={`/roadmap?board=${encodeURIComponent(selectedBoard)}`}
-            className="text-sm font-medium text-blue-600 hover:underline"
-          >
-            View full report →
-          </Link>
-        </div>
-
-        {roadmapLoading && (
-          <div className="flex items-center justify-center py-6">
-            <Loader2 className="h-5 w-5 animate-spin text-muted" />
-          </div>
-        )}
-
-        {!roadmapLoading && !roadmapConfigured && (
-          <p className="text-sm text-muted">
-            No JPD roadmap configured.{' '}
-            <Link href="/settings" className="text-blue-600 hover:underline">
-              Add a JPD project key in Settings
-            </Link>{' '}
-            to track roadmap coverage.
-          </p>
-        )}
-
-        {!roadmapLoading && roadmapConfigured && roadmapData.length === 0 && (
-          <p className="text-sm text-muted">No roadmap data found for this board.</p>
-        )}
-
-        {!roadmapLoading && roadmapConfigured && roadmapData.length > 0 && (
-          <>
-            {!roadmapHasDates && (
-              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                Roadmap ideas have no start/target dates — coverage shows 0%.
-                Trigger a sync after verifying the date field IDs in{' '}
-                <Link href="/settings" className="font-medium underline">
-                  Settings
-                </Link>
-                .
-              </div>
-            )}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted">Avg Roadmap Coverage</p>
-                <p className="mt-1 text-2xl font-bold">
-                  {roadmapAvgCoverage.toFixed(1)}%
-                </p>
-                <p className="mt-0.5 text-xs text-muted">
-                  across {roadmapData.length} {roadmapData.length !== 1 ? 'periods' : 'period'}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted">Avg On-Time Rate</p>
-                <p className="mt-1 text-2xl font-bold">
-                  {roadmapAvgOnTimeRate.toFixed(1)}%
-                </p>
-                <p className="mt-0.5 text-xs text-muted">
-                  of roadmap-linked issues delivered on time
-                </p>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { SprintModule } from './sprint/sprint.module.js';
 import { QuarterModule } from './quarter/quarter.module.js';
 import { WeekModule } from './week/week.module.js';
 import { GapsModule } from './gaps/gaps.module.js';
+import { AppConfigModule } from './config/config.module.js';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { GapsModule } from './gaps/gaps.module.js';
     WeekModule,
     GapsModule,
     HealthModule,
+    AppConfigModule,
   ],
 })
 export class AppModule {}

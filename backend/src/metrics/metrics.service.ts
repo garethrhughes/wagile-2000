@@ -1,7 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
 import {
   DeploymentFrequencyService,
   type DeploymentFrequencyResult,
@@ -57,7 +56,6 @@ export class MetricsService {
     private readonly cfrService: CfrService,
     private readonly mttrService: MttrService,
     private readonly cycleTimeService: CycleTimeService,
-    private readonly configService: ConfigService,
     @InjectRepository(JiraSprint)
     private readonly sprintRepo: Repository<JiraSprint>,
     @InjectRepository(BoardConfig)
@@ -66,7 +64,7 @@ export class MetricsService {
 
   async getDora(query: MetricsQueryDto): Promise<DoraMetricsResult[]> {
     let { startDate, endDate } = this.resolvePeriod(query);
-    const boardIds = this.resolveBoardIds(query.boardId);
+    const boardIds = await this.resolveBoardIds(query.boardId);
 
     // If sprintId is provided, resolve dates from the sprint record
     if (query.sprintId) {
@@ -114,7 +112,7 @@ export class MetricsService {
     query: MetricsQueryDto,
   ): Promise<DeploymentFrequencyResult[]> {
     const { startDate, endDate } = this.resolvePeriod(query);
-    const boardIds = this.resolveBoardIds(query.boardId);
+    const boardIds = await this.resolveBoardIds(query.boardId);
 
     return Promise.all(
       boardIds.map((id) =>
@@ -125,7 +123,7 @@ export class MetricsService {
 
   async getLeadTime(query: MetricsQueryDto): Promise<LeadTimeResult[]> {
     const { startDate, endDate } = this.resolvePeriod(query);
-    const boardIds = this.resolveBoardIds(query.boardId);
+    const boardIds = await this.resolveBoardIds(query.boardId);
 
     return Promise.all(
       boardIds.map((id) =>
@@ -136,7 +134,7 @@ export class MetricsService {
 
   async getCfr(query: MetricsQueryDto): Promise<CfrResult[]> {
     const { startDate, endDate } = this.resolvePeriod(query);
-    const boardIds = this.resolveBoardIds(query.boardId);
+    const boardIds = await this.resolveBoardIds(query.boardId);
 
     return Promise.all(
       boardIds.map((id) =>
@@ -147,7 +145,7 @@ export class MetricsService {
 
   async getMttr(query: MetricsQueryDto): Promise<MttrResult[]> {
     const { startDate, endDate } = this.resolvePeriod(query);
-    const boardIds = this.resolveBoardIds(query.boardId);
+    const boardIds = await this.resolveBoardIds(query.boardId);
 
     return Promise.all(
       boardIds.map((id) =>
@@ -163,7 +161,7 @@ export class MetricsService {
 
   async getDoraAggregate(query: DoraAggregateQueryDto): Promise<OrgDoraResult> {
     let { startDate, endDate } = this.resolvePeriod(query);
-    const boardIds = this.resolveBoardIds(query.boardId);
+    const boardIds = await this.resolveBoardIds(query.boardId);
 
     // If sprintId is provided, resolve dates from the sprint record
     if (query.sprintId) {
@@ -183,13 +181,16 @@ export class MetricsService {
         // Fetch observations (raw arrays) and totals (df, cfr) in parallel.
         // Lead time and MTTR summaries are derived from observations to avoid
         // duplicate DB queries (RC-1).
-        const [df, cfr, ltObs, mttrObs, boardConfig] = await Promise.all([
+        const [df, cfr, ltResult, mttrObs, boardConfig] = await Promise.all([
           this.deploymentFrequencyService.calculate(boardId, startDate, endDate),
           this.cfrService.calculate(boardId, startDate, endDate),
           this.leadTimeService.getLeadTimeObservations(boardId, startDate, endDate),
           this.mttrService.getMttrObservations(boardId, startDate, endDate),
           this.boardConfigRepo.findOne({ where: { boardId } }),
         ]);
+
+        const ltObs = ltResult.observations;
+        const ltAnomalyCount = ltResult.anomalyCount;
 
         // Derive per-board summaries from the already-fetched observations.
         // Arrays are pre-sorted by the observation methods.
@@ -201,6 +202,7 @@ export class MetricsService {
           p95Days: round2(ltP95),
           band: classifyLeadTime(ltMedian),
           sampleSize: ltObs.length,
+          anomalyCount: ltAnomalyCount,
         };
 
         const mttrMedianVal = percentile(mttrObs, 50);
@@ -429,7 +431,7 @@ export class MetricsService {
 
   async getCycleTime(query: CycleTimeQueryDto): Promise<CycleTimeResult[]> {
     let { startDate, endDate } = this.resolvePeriod(query);
-    const boardIds = this.resolveBoardIds(query.boardId);
+    const boardIds = await this.resolveBoardIds(query.boardId);
 
     // Resolve period key for embedding in observations
     const periodKey = query.quarter ?? query.sprintId ?? 'custom';
@@ -467,7 +469,7 @@ export class MetricsService {
   ): Promise<CycleTimeTrendPoint[]> {
     const limit = query.limit ?? 8;
     const mode = query.mode ?? 'quarters';
-    const boardIds = this.resolveBoardIds(query.boardId);
+    const boardIds = await this.resolveBoardIds(query.boardId);
 
     if (mode === 'sprints') {
       // Issue 5: single boardId guard — same as getDoraTrend()
@@ -558,15 +560,12 @@ export class MetricsService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private resolveBoardIds(boardId: string | undefined): string[] {
+  private async resolveBoardIds(boardId: string | undefined): Promise<string[]> {
     if (boardId) {
       return boardId.split(',').map((id) => id.trim());
     }
-    const boardIdsStr = this.configService.get<string>(
-      'JIRA_BOARD_IDS',
-      'ACC,BPT,SPS,OCS,DATA,PLAT',
-    );
-    return boardIdsStr.split(',').map((id) => id.trim());
+    const configs = await this.boardConfigRepo.find({ select: ['boardId'] });
+    return configs.map((c) => c.boardId);
   }
 
   private resolvePeriod(query: {
@@ -600,15 +599,4 @@ export class MetricsService {
     return { startDate, endDate };
   }
 
-  /**
-   * @deprecated Use quarterToDates from period-utils.ts directly.
-   * Kept for backward compatibility within this file.
-   */
-  private quarterToDates(quarter: string): {
-    startDate: Date;
-    endDate: Date;
-  } {
-    const { startDate, endDate } = quarterToDates(quarter);
-    return { startDate, endDate };
-  }
 }

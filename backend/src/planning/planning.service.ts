@@ -3,6 +3,7 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -12,6 +13,7 @@ import {
   BoardConfig,
 } from '../database/entities/index.js';
 import { isWorkItem } from '../metrics/issue-type-filters.js';
+import { dateParts, midnightInTz } from '../metrics/tz-utils.js';
 
 export interface SprintAccuracy {
   sprintId: string;
@@ -76,6 +78,7 @@ export class PlanningService {
     private readonly changelogRepo: Repository<JiraChangelog>,
     @InjectRepository(BoardConfig)
     private readonly boardConfigRepo: Repository<BoardConfig>,
+    private readonly configService: ConfigService,
   ) {}
 
   async getAccuracy(
@@ -603,6 +606,23 @@ export class PlanningService {
       return [];
     }
 
+    // Build map: issueKey → first done-transition timestamp (changelog-based)
+    const allBoundedKeys = boundedIssues.map((i) => i.key);
+    const doneChangelogs = await this.changelogRepo
+      .createQueryBuilder('cl')
+      .where('cl.issueKey IN (:...keys)', { keys: allBoundedKeys })
+      .andWhere('cl.field = :field', { field: 'status' })
+      .andWhere('cl.toValue IN (:...statuses)', { statuses: doneStatuses })
+      .orderBy('cl.changedAt', 'ASC')
+      .getMany();
+
+    const completionDateByIssue = new Map<string, Date>();
+    for (const cl of doneChangelogs) {
+      if (!completionDateByIssue.has(cl.issueKey)) {
+        completionDateByIssue.set(cl.issueKey, cl.changedAt);
+      }
+    }
+
     // Bucket issues by the quarter of their board-entry date (fall back to createdAt)
     const quarterMap = new Map<string, typeof onBoardIssues>();
     for (const issue of boundedIssues) {
@@ -626,7 +646,7 @@ export class PlanningService {
 
     for (const qKey of sortedKeys) {
       const issues = quarterMap.get(qKey)!;
-      const { startDate } = this.quarterToDates(qKey);
+      const { startDate, endDate } = this.quarterToDates(qKey);
       const gracePeriodEnd = new Date(
         startDate.getTime() + 14 * 24 * 60 * 60 * 1000,
       );
@@ -641,7 +661,10 @@ export class PlanningService {
         const pts = issue.points ?? 0;
         pointsIn += pts;
 
-        if (doneStatuses.includes(issue.status)) {
+        // Use changelog-based completion date — avoids stale current-status snapshot
+        const completedAt = completionDateByIssue.get(issue.key);
+        const isCompleted = completedAt !== undefined && completedAt <= endDate;
+        if (isCompleted) {
           completed++;
           pointsDone += pts;
         }
@@ -757,6 +780,23 @@ export class PlanningService {
       return [];
     }
 
+    // Build map: issueKey → first done-transition timestamp (changelog-based)
+    const allBoundedWeekKeys = boundedIssuesWeeks.map((i) => i.key);
+    const doneChangelogsWeeks = await this.changelogRepo
+      .createQueryBuilder('cl')
+      .where('cl.issueKey IN (:...keys)', { keys: allBoundedWeekKeys })
+      .andWhere('cl.field = :field', { field: 'status' })
+      .andWhere('cl.toValue IN (:...statuses)', { statuses: doneStatuses })
+      .orderBy('cl.changedAt', 'ASC')
+      .getMany();
+
+    const completionDateByIssueWeeks = new Map<string, Date>();
+    for (const cl of doneChangelogsWeeks) {
+      if (!completionDateByIssueWeeks.has(cl.issueKey)) {
+        completionDateByIssueWeeks.set(cl.issueKey, cl.changedAt);
+      }
+    }
+
     // Bucket issues by the week of their board-entry date (fall back to createdAt)
     const weekMap = new Map<string, typeof onBoardIssues>();
     for (const issue of boundedIssuesWeeks) {
@@ -778,7 +818,7 @@ export class PlanningService {
 
     for (const wKey of sortedKeys) {
       const issues = weekMap.get(wKey)!;
-      const { weekStart } = this.weekKeyToDates(wKey);
+      const { weekStart, weekEnd } = this.weekKeyToDates(wKey);
       // 1-day grace period (instead of 14-day for quarters)
       const gracePeriodEnd = new Date(
         weekStart.getTime() + 1 * 24 * 60 * 60 * 1000,
@@ -794,7 +834,10 @@ export class PlanningService {
         const pts = issue.points ?? 0;
         pointsIn += pts;
 
-        if (doneStatuses.includes(issue.status)) {
+        // Use changelog-based completion date — avoids stale current-status snapshot
+        const completedAt = completionDateByIssueWeeks.get(issue.key);
+        const isCompleted = completedAt !== undefined && completedAt <= weekEnd;
+        if (isCompleted) {
           completed++;
           pointsDone += pts;
         }
@@ -832,8 +875,10 @@ export class PlanningService {
   // ---------------------------------------------------------------------------
 
   private dateToQuarterKey(date: Date): string {
-    const q = Math.floor(date.getMonth() / 3) + 1;
-    return `${date.getFullYear()}-Q${q}`;
+    const tz = this.configService.get<string>('TIMEZONE', 'UTC');
+    const { year, month } = dateParts(date, tz);
+    const q = Math.floor(month / 3) + 1;
+    return `${year}-Q${q}`;
   }
 
   private quarterToDates(quarter: string): {
@@ -846,15 +891,14 @@ export class PlanningService {
         `Invalid quarter format: ${quarter}. Expected YYYY-QN`,
       );
     }
-
+    const tz = this.configService.get<string>('TIMEZONE', 'UTC');
     const year = parseInt(match[1], 10);
     const q = parseInt(match[2], 10);
-    const startMonth = (q - 1) * 3;
-
-    return {
-      startDate: new Date(year, startMonth, 1),
-      endDate: new Date(year, startMonth + 3, 0, 23, 59, 59, 999),
-    };
+    const startMonth = (q - 1) * 3; // 0-indexed
+    const startDate = midnightInTz(year, startMonth, 1, tz);
+    const endDate = midnightInTz(year, startMonth + 3, 0, tz);
+    endDate.setUTCHours(23, 59, 59, 999);
+    return { startDate, endDate };
   }
 
   // ---------------------------------------------------------------------------
@@ -862,20 +906,33 @@ export class PlanningService {
   // ---------------------------------------------------------------------------
 
   private dateToWeekKey(date: Date): string {
-    // Find the Thursday of the week (ISO weeks start Monday)
-    // Days to Thursday: Mon=+3, Tue=+2, Wed=+1, Thu=0, Fri=-1, Sat=-2, Sun=+4
-    const thursday = new Date(date);
-    const day = date.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-    const daysToThursday = day === 0 ? 4 : 4 - day;
-    thursday.setDate(date.getDate() + daysToThursday);
+    const tz = this.configService.get<string>('TIMEZONE', 'UTC');
+    const { year, month, day } = dateParts(date, tz);
+    // Build a UTC-based proxy for the local calendar date in `tz`
+    const localDate = new Date(Date.UTC(year, month, day));
+    // ISO 8601: find the Thursday of the same week to determine the ISO year.
+    // Jan 4 is always in ISO week 1 of its year.
+    const dow = localDate.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const daysToThursday = dow === 0 ? 4 : 4 - dow;
+    const thursday = new Date(localDate);
+    thursday.setUTCDate(localDate.getUTCDate() + daysToThursday);
 
-    const isoYear = thursday.getFullYear();
+    const isoYear = thursday.getUTCFullYear();
 
-    // Day of year for Thursday
-    const startOfYear = new Date(isoYear, 0, 1);
-    const diffMs = thursday.getTime() - startOfYear.getTime();
-    const dayOfYear = Math.floor(diffMs / (24 * 60 * 60 * 1000)) + 1;
-    const weekNumber = Math.ceil(dayOfYear / 7);
+    // Monday of ISO week 1: Jan 4 of isoYear minus (its weekday - 1)
+    const jan4 = new Date(Date.UTC(isoYear, 0, 4));
+    const jan4Day = jan4.getUTCDay();
+    const daysToMonday = jan4Day === 0 ? -6 : 1 - jan4Day;
+    const week1Monday = new Date(jan4);
+    week1Monday.setUTCDate(jan4.getUTCDate() + daysToMonday);
+
+    // Monday of this week (the week containing `date` in `tz`)
+    const thisMonday = new Date(localDate);
+    const daysToMon = dow === 0 ? -6 : 1 - dow;
+    thisMonday.setUTCDate(localDate.getUTCDate() + daysToMon);
+
+    const diffMs = thisMonday.getTime() - week1Monday.getTime();
+    const weekNumber = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000)) + 1;
 
     return `${isoYear}-W${String(weekNumber).padStart(2, '0')}`;
   }

@@ -50,6 +50,30 @@ export class MttrService {
     ];
     const incidentLabels = config?.incidentLabels ?? [];
     const incidentPriorities = config?.incidentPriorities ?? ['Critical'];
+    const inProgressNames: string[] = config?.inProgressStatusNames ?? [
+      'In Progress',
+      'In Review',
+      'Peer-Review',
+      'Peer Review',
+      'PEER REVIEW',
+      'PEER CODE REVIEW',
+      'Ready for Review',
+      'In Test',
+      'IN TEST',
+      'QA',
+      'QA testing',
+      'QA Validation',
+      'IN TESTING',
+      'Under Test',
+      'ready to test',
+      'Ready for Testing',
+      'READY FOR TESTING',
+      'Ready for Release',
+      'Ready for release',
+      'READY FOR RELEASE',
+      'Awaiting Release',
+      'READY',
+    ];
 
     // Get incident issues for this board
     const allIssues = (await this.issueRepo.find({
@@ -124,7 +148,7 @@ export class MttrService {
 
       const issueLogs = changelogsByIssue.get(issueKey) ?? [];
       const inProgressTransition = issueLogs.find(
-        (cl) => cl.toValue === 'In Progress',
+        (cl) => cl.toValue !== null && inProgressNames.includes(cl.toValue),
       );
       const startTime = inProgressTransition
         ? inProgressTransition.changedAt

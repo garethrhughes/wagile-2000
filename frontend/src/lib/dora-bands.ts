@@ -28,9 +28,9 @@ export function classifyDeploymentFrequency(deploymentsPerDay: number): DoraBand
  * Low    : ≥ 30 days
  */
 export function classifyLeadTime(medianDays: number): DoraBand {
-  if (medianDays < 1) return 'elite';
-  if (medianDays < 7) return 'high';
-  if (medianDays < 30) return 'medium';
+  if (medianDays <= 1) return 'elite';
+  if (medianDays <= 7) return 'high';
+  if (medianDays <= 30) return 'medium';
   return 'low';
 }
 
@@ -43,9 +43,9 @@ export function classifyLeadTime(medianDays: number): DoraBand {
  * Low    : ≥ 15 %
  */
 export function classifyChangeFailureRate(percentage: number): DoraBand {
-  if (percentage < 5) return 'elite';
-  if (percentage < 10) return 'high';
-  if (percentage < 15) return 'medium';
+  if (percentage <= 5) return 'elite';
+  if (percentage <= 10) return 'high';
+  if (percentage <= 15) return 'medium';
   return 'low';
 }
 

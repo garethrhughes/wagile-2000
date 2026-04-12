@@ -80,22 +80,7 @@ export class CfrService {
       };
     }
 
-    const issueKeys = allIssues.map((i) => i.key);
-
-    // Get done transitions in period
-    const doneTransitions = await this.changelogRepo
-      .createQueryBuilder('cl')
-      .select('DISTINCT cl.issueKey', 'issueKey')
-      .where('cl.issueKey IN (:...keys)', { keys: issueKeys })
-      .andWhere('cl.field = :field', { field: 'status' })
-      .andWhere('cl.toValue IN (:...statuses)', { statuses: doneStatuses })
-      .andWhere('cl.changedAt BETWEEN :start AND :end', {
-        start: startDate,
-        end: endDate,
-      })
-      .getRawMany<{ issueKey: string }>();
-
-    // Also count version-based deployments
+    // Primary path: issues with fixVersion whose releaseDate falls in range.
     const releasedVersions = await this.versionRepo.find({
       where: {
         projectKey: boardId,
@@ -107,18 +92,42 @@ export class CfrService {
 
     const versionIssueKeys =
       versionNames.length > 0
-        ? (
-            await this.issueRepo.find({
-              where: { boardId, fixVersion: In(versionNames) },
-            })
-          ).filter((i) => isWorkItem(i.issueType)).map((i) => i.key)
-        : [];
+        ? new Set(
+            (
+              await this.issueRepo.find({
+                where: { boardId, fixVersion: In(versionNames) },
+              })
+            )
+              .filter((i) => isWorkItem(i.issueType))
+              .map((i) => i.key),
+          )
+        : new Set<string>();
 
-    // Union of deployed issue keys
-    const deployedKeys = new Set([
-      ...doneTransitions.map((t) => t.issueKey),
-      ...versionIssueKeys,
-    ]);
+    // Fallback path: issues with NO fixVersion that transitioned to a done
+    // status in the period.  Only issues not already counted by the version
+    // path are eligible so there is no double-counting.
+    const noVersionKeys = allIssues
+      .filter((i) => i.fixVersion === null && !versionIssueKeys.has(i.key))
+      .map((i) => i.key);
+
+    let transitionIssueKeys = new Set<string>();
+    if (noVersionKeys.length > 0) {
+      const doneTransitions = await this.changelogRepo
+        .createQueryBuilder('cl')
+        .select('DISTINCT cl.issueKey', 'issueKey')
+        .where('cl.issueKey IN (:...keys)', { keys: noVersionKeys })
+        .andWhere('cl.field = :field', { field: 'status' })
+        .andWhere('cl.toValue IN (:...statuses)', { statuses: doneStatuses })
+        .andWhere('cl.changedAt BETWEEN :start AND :end', {
+          start: startDate,
+          end: endDate,
+        })
+        .getRawMany<{ issueKey: string }>();
+      transitionIssueKeys = new Set(doneTransitions.map((t) => t.issueKey));
+    }
+
+    // Combine both paths
+    const deployedKeys = new Set([...versionIssueKeys, ...transitionIssueKeys]);
     const totalDeployments = deployedKeys.size;
 
     // Count failure issues among deployed (type/label OR-gate)

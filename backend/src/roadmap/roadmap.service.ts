@@ -5,6 +5,7 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -18,6 +19,7 @@ import {
 } from '../database/entities/index.js';
 import { SyncService } from '../sync/sync.service.js';
 import { isWorkItem } from '../metrics/issue-type-filters.js';
+import { dateParts, midnightInTz } from '../metrics/tz-utils.js';
 
 export interface RoadmapSprintAccuracy {
   sprintId: string;
@@ -60,6 +62,7 @@ export class RoadmapService {
     @InjectRepository(BoardConfig)
     private readonly boardConfigRepo: Repository<BoardConfig>,
     private readonly syncService: SyncService,
+    private readonly configService: ConfigService,
   ) {}
 
   async getAccuracy(
@@ -432,10 +435,9 @@ export class RoadmapService {
         if (i.epicKey === null || !activeIdeas.has(i.epicKey)) return false;
         const item = activeIdeas.get(i.epicKey)!;
         const issueActivityStart = activityStartDates.get(i.key) ?? i.createdAt;
-        // Conservative: issues already in done status get null (treated as in-flight)
-        const issueActivityEnd = doneStatusNames.includes(i.status)
-          ? null
-          : (completionDates.get(i.key) ?? null);
+        // null means in-flight (no done-transition yet) → always qualifies.
+        // Non-null means completed at that timestamp; eligibility uses that date.
+        const issueActivityEnd = completionDates.get(i.key) ?? null;
         return this.isIssueEligibleForRoadmapItem(issueActivityStart, issueActivityEnd, item);
       });
       const eligibleCoveredKeys = new Set(eligibleCoveredIssues.map((i) => i.key));
@@ -569,23 +571,40 @@ export class RoadmapService {
   }
 
   private issueToQuarterKey(date: Date): string {
-    const q = Math.floor(date.getMonth() / 3) + 1;
-    return `${date.getFullYear()}-Q${q}`;
+    const tz = this.configService.get<string>('TIMEZONE', 'UTC');
+    const { year, month } = dateParts(date, tz);
+    const q = Math.floor(month / 3) + 1;
+    return `${year}-Q${q}`;
   }
 
   private dateToWeekKey(date: Date): string {
-    // Find the Thursday of the week (ISO: weeks start Monday)
-    const thursday = new Date(date);
-    const day = date.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-    const daysToThursday = day === 0 ? 4 : 4 - day;
-    thursday.setDate(date.getDate() + daysToThursday);
+    const tz = this.configService.get<string>('TIMEZONE', 'UTC');
+    const { year, month, day } = dateParts(date, tz);
+    // Build a local-date proxy in the given timezone to compute ISO week
+    const localDate = new Date(Date.UTC(year, month, day));
+    // ISO 8601: find the Thursday of the same week to determine the ISO year.
+    // Jan 4 is always in ISO week 1 of its year.
+    const dow = localDate.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const daysToThursday = dow === 0 ? 4 : 4 - dow;
+    const thursday = new Date(localDate);
+    thursday.setUTCDate(localDate.getUTCDate() + daysToThursday);
 
-    const isoYear = thursday.getFullYear();
+    const isoYear = thursday.getUTCFullYear();
 
-    const startOfYear = new Date(isoYear, 0, 1);
-    const diffMs = thursday.getTime() - startOfYear.getTime();
-    const dayOfYear = Math.floor(diffMs / (24 * 60 * 60 * 1000)) + 1;
-    const weekNumber = Math.ceil(dayOfYear / 7);
+    // Monday of ISO week 1: Jan 4 of isoYear minus (its weekday - 1)
+    const jan4 = new Date(Date.UTC(isoYear, 0, 4));
+    const jan4Day = jan4.getUTCDay();
+    const daysToMonday = jan4Day === 0 ? -6 : 1 - jan4Day;
+    const week1Monday = new Date(jan4);
+    week1Monday.setUTCDate(jan4.getUTCDate() + daysToMonday);
+
+    // Monday of this week (the week containing `date` in `tz`)
+    const thisMonday = new Date(localDate);
+    const daysToMon = dow === 0 ? -6 : 1 - dow;
+    thisMonday.setUTCDate(localDate.getUTCDate() + daysToMon);
+
+    const diffMs = thisMonday.getTime() - week1Monday.getTime();
+    const weekNumber = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000)) + 1;
 
     return `${isoYear}-W${String(weekNumber).padStart(2, '0')}`;
   }
@@ -762,10 +781,9 @@ export class RoadmapService {
         if (i.epicKey === null || !activeIdeas.has(i.epicKey)) return false;
         const item = activeIdeas.get(i.epicKey)!;
         const issueActivityStart = activityStartDatesWeekly.get(i.key) ?? i.createdAt;
-        // Conservative: issues already in done status get null (treated as in-flight)
-        const issueActivityEnd = doneStatusNames.includes(i.status)
-          ? null
-          : (completionDatesWeekly.get(i.key) ?? null);
+        // null means in-flight (no done-transition yet) → always qualifies.
+        // Non-null means completed at that timestamp; eligibility uses that date.
+        const issueActivityEnd = completionDatesWeekly.get(i.key) ?? null;
         return this.isIssueEligibleForRoadmapItem(issueActivityStart, issueActivityEnd, item);
       });
       const eligibleCoveredKeys = new Set(eligibleCoveredIssues.map((i) => i.key));
@@ -818,9 +836,13 @@ export class RoadmapService {
       return this.emptyAccuracy(sprint);
     }
 
-    // Build epicKey → targetDate map (no date-window filter).
-    // Conflict resolution: keep the idea with the later targetDate.
-    const epicIdeaMap = this.buildEpicIdeaMap(allIdeas);
+    // Build epicKey → targetDate map scoped to the sprint window.
+    // filterIdeasForWindow excludes ideas without both dates (decision 2)
+    // and applies the date-window overlap filter. Conflict resolution: keep
+    // the idea with the later targetDate.
+    const sprintStart = sprint.startDate ?? new Date();
+    const sprintEnd = sprint.endDate ?? new Date();
+    const epicIdeaMap = this.filterIdeasForWindow(allIdeas, sprintStart, sprintEnd);
 
     // Query ALL done-status transitions for sprint issues — no date restriction
     // and no needsChangelogCheck split.  This ensures issues that were already
@@ -910,26 +932,6 @@ export class RoadmapService {
   }
 
   /**
-   * Build a map from epicKey → { targetDate } for all ideas that have a
-   * targetDate and at least one delivery epic key. No date-window filter.
-   * Conflict resolution: if multiple ideas link the same epic key, keep
-   * the one with the later targetDate (most recent delivery commitment).
-   */
-  private buildEpicIdeaMap(ideas: JpdIdea[]): Map<string, { targetDate: Date }> {
-    const result = new Map<string, { targetDate: Date }>();
-    for (const idea of ideas) {
-      if (!idea.deliveryIssueKeys || idea.targetDate === null) continue;
-      for (const epicKey of idea.deliveryIssueKeys.filter(Boolean)) {
-        const existing = result.get(epicKey);
-        if (!existing || idea.targetDate > existing.targetDate) {
-          result.set(epicKey, { targetDate: idea.targetDate });
-        }
-      }
-    }
-    return result;
-  }
-
-  /**
    * Extend a date to 23:59:59.999 UTC (end of calendar day).
    * Polaris stores targetDate as a date-only value (midnight UTC); this
    * ensures a completion timestamp at any point during the target day
@@ -946,13 +948,15 @@ export class RoadmapService {
     if (!match) {
       throw new Error(`Invalid quarter format: ${quarter}. Expected YYYY-QN`);
     }
+    const tz = this.configService.get<string>('TIMEZONE', 'UTC');
     const year = parseInt(match[1], 10);
     const q = parseInt(match[2], 10);
-    const startMonth = (q - 1) * 3;
-    return {
-      startDate: new Date(year, startMonth, 1),
-      endDate: new Date(year, startMonth + 3, 0, 23, 59, 59, 999),
-    };
+    const startMonth = (q - 1) * 3; // 0-indexed
+    const startDate = midnightInTz(year, startMonth, 1, tz);
+    // Last day of the quarter: month startMonth+3 day 0 = last day of month startMonth+2
+    const endDate = midnightInTz(year, startMonth + 3, 0, tz);
+    endDate.setUTCHours(23, 59, 59, 999);
+    return { startDate, endDate };
   }
 
   async getConfigs(): Promise<RoadmapConfig[]> {

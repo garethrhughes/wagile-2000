@@ -18,6 +18,7 @@ import type { ValueType, NameType } from 'recharts/types/component/DefaultToolti
 import {
   getRoadmapAccuracy,
   getRoadmapConfigs,
+  getAppConfig,
   type RoadmapSprintAccuracy,
 } from '@/lib/api'
 import { useBoardsStore } from '@/store/boards-store'
@@ -30,18 +31,30 @@ import { NoBoardsConfigured } from '@/components/ui/no-boards-configured'
 // Quarter helpers
 // ---------------------------------------------------------------------------
 
-function getQuarterKey(isoDate: string | null): string | null {
-  if (!isoDate) return null;
-  const d = new Date(isoDate);
-  if (isNaN(d.getTime())) return null;
-  const q = Math.floor(d.getMonth() / 3) + 1;
-  return `${d.getFullYear()}-Q${q}`;
+function getQuarterKey(isoDate: string | null, tz: string): string | null {
+  if (!isoDate) return null
+  const d = new Date(isoDate)
+  if (isNaN(d.getTime())) return null
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+  })
+  const [year, month] = formatter.format(d).split('-').map(Number)
+  const q = Math.floor((month - 1) / 3) + 1
+  return `${year}-Q${q}`
 }
 
-function getCurrentQuarterKey(): string {
-  const now = new Date();
-  const q = Math.floor(now.getMonth() / 3) + 1;
-  return `${now.getFullYear()}-Q${q}`;
+function getCurrentQuarterKey(tz: string): string {
+  const now = new Date()
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+  })
+  const [year, month] = formatter.format(now).split('-').map(Number)
+  const q = Math.floor((month - 1) / 3) + 1
+  return `${year}-Q${q}`
 }
 
 // ---------------------------------------------------------------------------
@@ -57,18 +70,18 @@ interface QuarterRow {
   roadmapOnTimeRate: number;
 }
 
-function groupByQuarter(sprints: RoadmapSprintAccuracy[]): QuarterRow[] {
+function groupByQuarter(sprints: RoadmapSprintAccuracy[], tz: string): QuarterRow[] {
   const map = new Map<string, RoadmapSprintAccuracy[]>();
 
   for (const s of sprints) {
-    const key = getQuarterKey(s.startDate);
+    const key = getQuarterKey(s.startDate, tz);
     if (!key) continue;
     const list = map.get(key) ?? [];
     list.push(s);
     map.set(key, list);
   }
 
-  const currentKey = getCurrentQuarterKey();
+  const currentKey = getCurrentQuarterKey(tz);
 
   const rows: QuarterRow[] = [];
   for (const [quarter, group] of map.entries()) {
@@ -80,11 +93,11 @@ function groupByQuarter(sprints: RoadmapSprintAccuracy[]): QuarterRow[] {
       totalIssues > 0
         ? Math.round((coveredIssues / totalIssues) * 10000) / 100
         : 0;
-    // roadmapOnTimeRate: weighted average of per-sprint on-time rates
-    const totalOnTimeRateSum = group.reduce((acc, s) => acc + s.roadmapOnTimeRate, 0);
+    // P2-6: roadmapOnTimeRate = sum(coveredIssues) ÷ sum(totalIssues) — sum-of-counts,
+    // not average of per-sprint percentages.
     const roadmapOnTimeRate =
-      group.length > 0
-        ? Math.round((totalOnTimeRateSum / group.length) * 100) / 100
+      totalIssues > 0
+        ? Math.round((coveredIssues / totalIssues) * 10000) / 100
         : 0;
     rows.push({
       quarter,
@@ -230,14 +243,19 @@ export default function RoadmapPage() {
   const [rawData, setRawData] = useState<RoadmapSprintAccuracy[]>([])
   const [kanbanWeekData, setKanbanWeekData] = useState<RoadmapSprintAccuracy[]>([])
   const [hasConfigs, setHasConfigs] = useState<boolean | null>(null)
+  const [timezone, setTimezone] = useState('UTC')
 
   const isKanban = kanbanBoardIds.has(selectedBoard)
 
-  // Check if any roadmap configs exist on mount
+  // Check if any roadmap configs exist on mount; also fetch server timezone
   useEffect(() => {
-    getRoadmapConfigs()
-      .then((configs) => {
+    Promise.all([
+      getRoadmapConfigs(),
+      getAppConfig(),
+    ])
+      .then(([configs, appConfig]) => {
         setHasConfigs(configs.length > 0)
+        setTimezone(appConfig.timezone)
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Failed to load roadmap configuration')
@@ -319,7 +337,7 @@ export default function RoadmapPage() {
   }, [selectedBoard, isKanban, kanbanPeriod, boardsStatus]);
 
   // Quarter rows derived client-side from raw sprint data
-  const quarterRows = useMemo(() => groupByQuarter(rawData), [rawData]);
+  const quarterRows = useMemo(() => groupByQuarter(rawData, timezone), [rawData, timezone]);
 
   // Summary stats across ALL displayed rows
   const { avgCoverage, avgOnTimeRate } = useMemo(() => {

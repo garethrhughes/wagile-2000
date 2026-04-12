@@ -796,3 +796,13 @@ export interface GapsResponse {
 export function getGaps(): Promise<GapsResponse> {
   return apiFetch<GapsResponse>('/api/gaps')
 }
+
+// ---- App config endpoint -------------------------------------------------
+
+export interface AppConfig {
+  timezone: string
+}
+
+export function getAppConfig(): Promise<AppConfig> {
+  return apiFetch<AppConfig>('/api/config')
+}

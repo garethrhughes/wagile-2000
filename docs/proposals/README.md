@@ -18,3 +18,5 @@
 | [0014](0014-gaps-report-filtering.md) | Gaps Report Filtering: Active Sprint and Kanban Board Rules | Accepted | 2026-04-12 |
 | [0015](0015-configurable-board-ids.md) | Configurable Board IDs: Replace Hardcoded Constants with Dynamic API Data | Accepted | 2026-04-12 |
 | [0016](0016-ui-driven-board-management.md) | UI-Driven Board Management: Remove `JIRA_BOARD_IDS` and Replace with CRUD API + Settings UI | Accepted | 2026-04-12 |
+| [0017](0017-metric-calculation-audit.md) | Metric Calculation Audit | Informational | 2026-04-12 |
+| [0018](0018-metric-calculation-fixes.md) | Metric Calculation Fixes (P1 + P2) | Draft | 2026-04-12 |

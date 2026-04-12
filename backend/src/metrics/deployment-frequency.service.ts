@@ -48,7 +48,7 @@ export class DeploymentFrequencyService {
       'Released',
     ];
 
-    // Primary: count issues with fixVersion that has a releaseDate in range
+    // Primary path: issues with a fixVersion whose releaseDate falls in range.
     const releasedVersions = await this.versionRepo.find({
       where: {
         projectKey: boardId,
@@ -58,7 +58,7 @@ export class DeploymentFrequencyService {
     });
 
     const versionNames = releasedVersions.map((v) => v.name);
-    let versionDeployments = 0;
+    let versionIssueKeys = new Set<string>();
 
     if (versionNames.length > 0) {
       const issues = (await this.issueRepo.find({
@@ -67,19 +67,38 @@ export class DeploymentFrequencyService {
           fixVersion: In(versionNames),
         },
       })).filter((i) => isWorkItem(i.issueType));
-      versionDeployments = issues.length;
+      versionIssueKeys = new Set(issues.map((i) => i.key));
     }
 
-    // Fallback: count issues that transitioned to a done status in the period
-    const transitionDeployments = await this.countDoneTransitions(
-      boardId,
-      doneStatuses,
-      startDate,
-      endDate,
-    );
+    // Fallback path: issues with NO fixVersion that transitioned to a done status
+    // in the period.  We only count issues not already counted by the version path,
+    // so there is no double-counting.
+    const allBoardIssues = (await this.issueRepo.find({
+      where: { boardId },
+      select: ['key', 'issueType', 'fixVersion'],
+    })).filter((i) => isWorkItem(i.issueType));
 
-    // Use the larger of the two counts (avoids double counting by taking max)
-    const totalDeployments = Math.max(versionDeployments, transitionDeployments);
+    const noVersionKeys = allBoardIssues
+      .filter((i) => i.fixVersion === null && !versionIssueKeys.has(i.key))
+      .map((i) => i.key);
+
+    let transitionKeys = new Set<string>();
+    if (noVersionKeys.length > 0) {
+      const rows = await this.changelogRepo
+        .createQueryBuilder('cl')
+        .select('DISTINCT cl.issueKey', 'issueKey')
+        .where('cl.issueKey IN (:...keys)', { keys: noVersionKeys })
+        .andWhere('cl.field = :field', { field: 'status' })
+        .andWhere('cl.toValue IN (:...statuses)', { statuses: doneStatuses })
+        .andWhere('cl.changedAt BETWEEN :start AND :end', {
+          start: startDate,
+          end: endDate,
+        })
+        .getRawMany<{ issueKey: string }>();
+      transitionKeys = new Set(rows.map((r) => r.issueKey));
+    }
+
+    const totalDeployments = versionIssueKeys.size + transitionKeys.size;
 
     const periodMs = endDate.getTime() - startDate.getTime();
     const periodDays = Math.max(periodMs / (1000 * 60 * 60 * 24), 1);
@@ -92,36 +111,5 @@ export class DeploymentFrequencyService {
       band: classifyDeploymentFrequency(deploymentsPerDay),
       periodDays: Math.round(periodDays),
     };
-  }
-
-  private async countDoneTransitions(
-    boardId: string,
-    doneStatuses: string[],
-    startDate: Date,
-    endDate: Date,
-  ): Promise<number> {
-    // Get all issues for this board
-    const issues = (await this.issueRepo.find({
-      where: { boardId },
-      select: ['key', 'issueType'],
-    })).filter((i) => isWorkItem(i.issueType));
-
-    if (issues.length === 0) return 0;
-
-    const issueKeys = issues.map((i) => i.key);
-
-    // Find changelogs for status transitions to done statuses in the period
-    const changelogs = await this.changelogRepo
-      .createQueryBuilder('cl')
-      .where('cl.issueKey IN (:...keys)', { keys: issueKeys })
-      .andWhere('cl.field = :field', { field: 'status' })
-      .andWhere('cl.toValue IN (:...statuses)', { statuses: doneStatuses })
-      .andWhere('cl.changedAt BETWEEN :start AND :end', {
-        start: startDate,
-        end: endDate,
-      })
-      .getCount();
-
-    return changelogs;
   }
 }

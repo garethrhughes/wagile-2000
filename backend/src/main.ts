@@ -10,6 +10,19 @@ async function bootstrap() {
 
   const configService = app.get(ConfigService);
 
+  // P2-7: Validate TIMEZONE env var at startup — fail fast on invalid IANA zone.
+  const timezone = configService.get<string>('TIMEZONE', 'UTC');
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: timezone });
+  } catch (e) {
+    if (e instanceof RangeError) {
+      throw new Error(
+        `Invalid TIMEZONE env var "${timezone}". Must be a valid IANA timezone (e.g. "America/New_York", "UTC").`,
+      );
+    }
+    throw e;
+  }
+
   app.enableCors({
     origin: configService.get<string>('FRONTEND_URL', 'http://localhost:3000'),
     credentials: true,

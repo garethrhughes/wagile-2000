@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PlanningService } from './planning.service.js';
 import { Repository } from 'typeorm';
 import {
@@ -21,6 +22,12 @@ function mockRepo<T extends object>(): jest.Mocked<Repository<T>> {
   } as unknown as jest.Mocked<Repository<T>>;
 }
 
+function mockConfigService(): jest.Mocked<ConfigService> {
+  return {
+    get: jest.fn().mockImplementation((_key: string, defaultValue?: unknown) => defaultValue ?? 'UTC'),
+  } as unknown as jest.Mocked<ConfigService>;
+}
+
 describe('PlanningService', () => {
   let service: PlanningService;
   let sprintRepo: jest.Mocked<Repository<JiraSprint>>;
@@ -39,6 +46,7 @@ describe('PlanningService', () => {
       issueRepo,
       changelogRepo,
       boardConfigRepo,
+      mockConfigService(),
     );
   });
 

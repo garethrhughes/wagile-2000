@@ -17,6 +17,8 @@ export interface LeadTimeResult {
   p95Days: number;
   band: DoraBand;
   sampleSize: number;
+  /** Number of negative lead-time observations excluded from the sample */
+  anomalyCount: number;
 }
 
 @Injectable()
@@ -33,14 +35,16 @@ export class LeadTimeService {
   ) {}
 
   /**
-   * Returns the raw sorted lead-time-days observations for a board/period.
+   * Returns the raw sorted lead-time-days observations for a board/period,
+   * plus a count of anomalous (negative or zero-day) observations that were
+   * excluded.
    * Used by MetricsService.getDoraAggregate() for pooled-median computation.
    */
   async getLeadTimeObservations(
     boardId: string,
     startDate: Date,
     endDate: Date,
-  ): Promise<number[]> {
+  ): Promise<{ observations: number[]; anomalyCount: number }> {
     const config = await this.boardConfigRepo.findOne({
       where: { boardId },
     });
@@ -49,14 +53,37 @@ export class LeadTimeService {
       'Closed',
       'Released',
     ];
-    const isKanban = config?.boardType === 'kanban';
+    const inProgressNames: string[] = config?.inProgressStatusNames ?? [
+      'In Progress',
+      'In Review',
+      'Peer-Review',
+      'Peer Review',
+      'PEER REVIEW',
+      'PEER CODE REVIEW',
+      'Ready for Review',
+      'In Test',
+      'IN TEST',
+      'QA',
+      'QA testing',
+      'QA Validation',
+      'IN TESTING',
+      'Under Test',
+      'ready to test',
+      'Ready for Testing',
+      'READY FOR TESTING',
+      'Ready for Release',
+      'Ready for release',
+      'READY FOR RELEASE',
+      'Awaiting Release',
+      'READY',
+    ];
 
     // Get all issues for this board
     const issues = (await this.issueRepo.find({
       where: { boardId },
     })).filter((i) => isWorkItem(i.issueType));
 
-    if (issues.length === 0) return [];
+    if (issues.length === 0) return { observations: [], anomalyCount: 0 };
 
     const issueKeys = issues.map((i) => i.key);
 
@@ -95,28 +122,23 @@ export class LeadTimeService {
     );
 
     const leadTimeDays: number[] = [];
+    let anomalyCount = 0;
 
     for (const issue of issues) {
       const issueLogs = changelogsByIssue.get(issue.key) ?? [];
 
       // Determine start time.
-      // For both Scrum and Kanban: prefer the first "In Progress" transition,
-      // which reflects when a team member actually began the work (aligns with
-      // LinearB's Jira-based Coding Time methodology and is more accurate than
-      // issue creation, which can precede active work by days or weeks).
-      // Kanban: skip issues with no In Progress transition (no meaningful start).
-      // Scrum: fall back to issue creation if no transition exists.
+      // For both Scrum and Kanban: prefer the first transition to an
+      // "in progress" status (board-config-aware; defaults to ["In Progress"]).
+      // Issues with no such transition are skipped entirely — they have no
+      // meaningful cycle-time start and must not pollute the distribution.
       const inProgressTransition = issueLogs.find(
-        (cl) => cl.toValue === 'In Progress',
+        (cl) => cl.toValue !== null && inProgressNames.includes(cl.toValue),
       );
-      let startTime: Date;
-      if (inProgressTransition) {
-        startTime = inProgressTransition.changedAt;
-      } else if (isKanban) {
-        continue;
-      } else {
-        startTime = issue.createdAt;
+      if (!inProgressTransition) {
+        continue; // skip: no work-started evidence for either board type
       }
+      const startTime: Date = inProgressTransition.changedAt;
 
       // Determine end time: first done/released transition in the period
       const doneTransition = issueLogs.find(
@@ -148,11 +170,13 @@ export class LeadTimeService {
         (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60 * 24);
       if (days >= 0) {
         leadTimeDays.push(days);
+      } else {
+        anomalyCount++;
       }
     }
 
     leadTimeDays.sort((a, b) => a - b);
-    return leadTimeDays;
+    return { observations: leadTimeDays, anomalyCount };
   }
 
   async calculate(
@@ -160,7 +184,7 @@ export class LeadTimeService {
     startDate: Date,
     endDate: Date,
   ): Promise<LeadTimeResult> {
-    const leadTimeDays = await this.getLeadTimeObservations(
+    const { observations: leadTimeDays, anomalyCount } = await this.getLeadTimeObservations(
       boardId,
       startDate,
       endDate,
@@ -173,6 +197,7 @@ export class LeadTimeService {
         p95Days: 0,
         band: classifyLeadTime(0),
         sampleSize: 0,
+        anomalyCount,
       };
     }
 
@@ -186,6 +211,7 @@ export class LeadTimeService {
       p95Days: round2(p95),
       band: classifyLeadTime(median),
       sampleSize: leadTimeDays.length,
+      anomalyCount,
     };
   }
 }
