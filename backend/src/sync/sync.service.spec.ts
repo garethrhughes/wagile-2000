@@ -12,6 +12,7 @@ import {
   JpdIdea,
   JiraIssueLink,
 } from '../database/entities/index.js';
+import { SprintReportService } from '../sprint-report/sprint-report.service.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -77,6 +78,7 @@ describe('SyncService', () => {
   let roadmapConfigRepo: jest.Mocked<Repository<RoadmapConfig>>;
   let jpdIdeaRepo: jest.Mocked<Repository<JpdIdea>>;
   let issueLinkRepo: jest.Mocked<Repository<JiraIssueLink>>;
+  let sprintReportService: jest.Mocked<SprintReportService>;
 
   beforeEach(() => {
     jiraClient = mockJiraClient();
@@ -89,6 +91,9 @@ describe('SyncService', () => {
     roadmapConfigRepo = mockRepo<RoadmapConfig>();
     jpdIdeaRepo = mockRepo<JpdIdea>();
     issueLinkRepo = mockRepo<JiraIssueLink>();
+    sprintReportService = {
+      generateIfClosed: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<SprintReportService>;
 
     service = new SyncService(
       jiraClient,
@@ -101,6 +106,7 @@ describe('SyncService', () => {
       roadmapConfigRepo,
       jpdIdeaRepo,
       issueLinkRepo,
+      sprintReportService,
     );
   });
 

@@ -22,3 +22,5 @@
 | [0018](0018-metric-calculation-fixes.md) | Metric Calculation Fixes (P1 + P2) | Draft | 2026-04-12 |
 | [0019](0019-aws-hosting-low-cost.md) | AWS Hosting (Minimum Cost) | Proposed | 2026-04-13 |
 | [0020](0020-in-flight-roadmap-coverage.md) | In-Flight Roadmap Coverage: Count Active-Sprint Issues as Covered | Draft | 2026-04-13 |
+| [0021](0021-dora-metrics-calculation-reference.md) | DORA Metrics Calculation Reference | Informational | 2026-04-13 |
+| [0022](0022-sprint-report.md) | Sprint Report: Composite Scoring, Recommendations & Trend | Proposed | 2026-04-13 |

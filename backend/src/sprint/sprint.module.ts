@@ -24,5 +24,6 @@ import { SprintDetailService } from './sprint-detail.service.js';
   ],
   controllers: [SprintController],
   providers: [SprintDetailService],
+  exports: [SprintDetailService],
 })
 export class SprintModule {}

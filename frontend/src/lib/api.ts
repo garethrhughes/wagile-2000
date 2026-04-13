@@ -808,3 +808,85 @@ export interface AppConfig {
 export function getAppConfig(): Promise<AppConfig> {
   return apiFetch<AppConfig>('/api/config')
 }
+
+// ---- Sprint Report types and endpoints --------------------------------
+
+export type SprintReportBand = 'strong' | 'good' | 'fair' | 'needs-attention'
+
+export interface SprintDimensionScore {
+  score: number
+  band?: DoraBand
+  rawValue: number | null
+  rawUnit: string
+}
+
+export interface SprintDimensionScores {
+  deliveryRate: SprintDimensionScore
+  scopeStability: SprintDimensionScore
+  roadmapCoverage: SprintDimensionScore
+  leadTime: SprintDimensionScore
+  deploymentFrequency: SprintDimensionScore
+  changeFailureRate: SprintDimensionScore
+  mttr: SprintDimensionScore
+}
+
+export interface SprintRecommendation {
+  id: string
+  dimension: string
+  severity: 'info' | 'warning' | 'critical'
+  message: string
+}
+
+export interface SprintReportTrendPoint {
+  sprintId: string
+  sprintName: string
+  compositeScore: number
+  scores: SprintDimensionScores
+}
+
+export interface SprintReportResponse {
+  boardId: string
+  sprintId: string
+  sprintName: string
+  startDate: string | null
+  endDate: string | null
+  compositeScore: number
+  compositeBand: SprintReportBand
+  scores: SprintDimensionScores
+  recommendations: SprintRecommendation[]
+  trend: SprintReportTrendPoint[]
+  generatedAt: string
+  dataAsOf: string
+}
+
+export interface SprintReportSummary {
+  boardId: string
+  sprintId: string
+  sprintName: string
+  startDate: string | null
+  endDate: string | null
+  compositeScore: number
+  compositeBand: SprintReportBand
+  generatedAt: string
+}
+
+export function getSprintReport(
+  boardId: string,
+  sprintId: string,
+  refresh = false,
+): Promise<SprintReportResponse> {
+  return apiFetch(
+    `/api/sprint-report/${encodeURIComponent(boardId)}/${encodeURIComponent(sprintId)}${refresh ? '?refresh=true' : ''}`,
+  )
+}
+
+export function getSprintReportList(boardId: string): Promise<SprintReportSummary[]> {
+  return apiFetch(`/api/sprint-report/${encodeURIComponent(boardId)}`)
+}
+
+export function deleteSprintReport(boardId: string, sprintId: string): Promise<void> {
+  return apiFetch(
+    `/api/sprint-report/${encodeURIComponent(boardId)}/${encodeURIComponent(sprintId)}`,
+    { method: 'DELETE' },
+  )
+}

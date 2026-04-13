@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
-import { Loader2, ExternalLink, AlertCircle } from 'lucide-react'
+import Link from 'next/link'
+import { Loader2, ExternalLink, AlertCircle, BarChart2 } from 'lucide-react'
 import {
   getSprintDetail,
   type SprintDetailResponse,
@@ -336,8 +337,17 @@ export default function SprintDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <div className="mb-2">
+        <div className="mb-2 flex flex-wrap items-center gap-3">
           <BackButton label={backLabel} fallbackHref={backFallback} />
+          {data.state === 'closed' && (
+            <Link
+              href={`/sprint-report/${boardId}/${sprintId}`}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1 text-sm font-medium text-foreground shadow-sm hover:bg-gray-50"
+            >
+              <BarChart2 className="h-4 w-4" />
+              View Report
+            </Link>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-bold">{data.sprintName}</h1>

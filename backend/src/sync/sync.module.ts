@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SyncService } from './sync.service.js';
 import { SyncController } from './sync.controller.js';
@@ -14,6 +14,7 @@ import {
   JpdIdea,
   JiraIssueLink,
 } from '../database/entities/index.js';
+import { SprintReportModule } from '../sprint-report/sprint-report.module.js';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import {
       JiraIssueLink,
     ]),
     JiraModule,
+    forwardRef(() => SprintReportModule),
   ],
   controllers: [SyncController],
   providers: [SyncService],

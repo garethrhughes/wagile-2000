@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
@@ -19,6 +19,7 @@ import type {
   JiraIssueValue,
   JiraIssueLink as JiraIssueLinkType,
 } from '../jira/jira.types.js';
+import { SprintReportService } from '../sprint-report/sprint-report.service.js';
 
 @Injectable()
 export class SyncService {
@@ -44,6 +45,8 @@ export class SyncService {
     private readonly jpdIdeaRepo: Repository<JpdIdea>,
     @InjectRepository(JiraIssueLink)
     private readonly issueLinkRepo: Repository<JiraIssueLink>,
+    @Inject(forwardRef(() => SprintReportService))
+    private readonly sprintReportService: SprintReportService,
   ) {}
 
   @Cron('0 */30 * * * *')
@@ -67,6 +70,15 @@ export class SyncService {
     } catch (error) {
       this.logger.warn(
         `syncRoadmaps failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    // Auto-generate reports for any newly closed sprints (fire-and-forget)
+    for (const boardId of boardIds) {
+      this.triggerSprintReportsForBoard(boardId).catch((err: unknown) =>
+        this.logger.warn(
+          `Sprint report trigger failed for ${boardId}: ${err instanceof Error ? err.message : String(err)}`,
+        ),
       );
     }
 
@@ -545,6 +557,13 @@ export class SyncService {
     }
 
     this.logger.log(`Synced ${ideas.length} JPD ideas for project ${jpdKey}`);
+  }
+
+  private async triggerSprintReportsForBoard(boardId: string): Promise<void> {
+    const closedSprints = await this.sprintRepo.find({ where: { boardId, state: 'closed' } });
+    for (const sprint of closedSprints) {
+      await this.sprintReportService.generateIfClosed(boardId, sprint.id);
+    }
   }
 
   async getStatus(): Promise<
