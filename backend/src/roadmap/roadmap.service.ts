@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
   ConflictException,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
@@ -61,6 +63,7 @@ export class RoadmapService {
     private readonly roadmapConfigRepo: Repository<RoadmapConfig>,
     @InjectRepository(BoardConfig)
     private readonly boardConfigRepo: Repository<BoardConfig>,
+    @Inject(forwardRef(() => SyncService))
     private readonly syncService: SyncService,
     private readonly configService: ConfigService,
   ) {}
