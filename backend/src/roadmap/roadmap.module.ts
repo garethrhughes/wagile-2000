@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { RoadmapService } from './roadmap.service.js';
 import { RoadmapController } from './roadmap.controller.js';
@@ -22,7 +22,7 @@ import { SyncModule } from '../sync/sync.module.js';
       RoadmapConfig,
       BoardConfig,
     ]),
-    SyncModule,
+    forwardRef(() => SyncModule),
   ],
   controllers: [RoadmapController],
   providers: [RoadmapService],
