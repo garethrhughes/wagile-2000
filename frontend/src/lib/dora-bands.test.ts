@@ -33,6 +33,11 @@ describe('classifyDeploymentFrequency', () => {
 describe('classifyLeadTime', () => {
   it('returns elite for < 1 day', () => {
     expect(classifyLeadTime(0.5)).toBe('elite');
+    expect(classifyLeadTime(0)).toBe('elite');
+  });
+
+  it('returns high at exactly 1 day (boundary — not elite)', () => {
+    expect(classifyLeadTime(1)).toBe('high');
   });
 
   it('returns high for < 7 days', () => {

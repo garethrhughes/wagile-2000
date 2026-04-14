@@ -66,6 +66,7 @@ interface QuarterRow {
   totalIssues: number;
   coveredIssues: number;
   uncoveredIssues: number;
+  linkedCount: number;
   roadmapCoverage: number;
   roadmapOnTimeRate: number;
 }
@@ -88,22 +89,24 @@ function groupByQuarter(sprints: RoadmapSprintAccuracy[], tz: string): QuarterRo
     const totalIssues = group.reduce((acc, s) => acc + s.totalIssues, 0);
     const coveredIssues = group.reduce((acc, s) => acc + s.coveredIssues, 0);
     const uncoveredIssues = group.reduce((acc, s) => acc + s.uncoveredIssues, 0);
+    const linkedCount = group.reduce((acc, s) => acc + s.linkedCount, 0);
     // Recompute from totals for consistency
     const roadmapCoverage =
       totalIssues > 0
         ? Math.round((coveredIssues / totalIssues) * 10000) / 100
         : 0;
-    // P2-6: roadmapOnTimeRate = sum(coveredIssues) ÷ sum(totalIssues) — sum-of-counts,
-    // not average of per-sprint percentages.
+    // NEW-2 fix: roadmapOnTimeRate = coveredIssues ÷ linkedCount (issues with a roadmap link),
+    // not ÷ totalIssues.  This correctly measures "on-time rate among linked issues only".
     const roadmapOnTimeRate =
-      totalIssues > 0
-        ? Math.round((coveredIssues / totalIssues) * 10000) / 100
+      linkedCount > 0
+        ? Math.round((coveredIssues / linkedCount) * 10000) / 100
         : 0;
     rows.push({
       quarter,
       totalIssues,
       coveredIssues,
       uncoveredIssues,
+      linkedCount,
       roadmapCoverage,
       roadmapOnTimeRate,
     });
@@ -349,7 +352,7 @@ function RoadmapPageInner() {
 
   // Summary stats across ALL displayed rows
   const { avgCoverage, avgOnTimeRate } = useMemo(() => {
-    const rows: Array<{ roadmapCoverage: number; roadmapOnTimeRate: number }> =
+    const rows: Array<{ coveredIssues: number; totalIssues: number; linkedCount: number }> =
       isKanban
         ? kanbanPeriod === 'week'
           ? kanbanWeekData
@@ -358,11 +361,13 @@ function RoadmapPageInner() {
           ? quarterRows
           : rawData;
     if (rows.length === 0) return { avgCoverage: 0, avgOnTimeRate: 0 };
-    const totalCoverage = rows.reduce((s, r) => s + r.roadmapCoverage, 0);
-    const totalOnTime = rows.reduce((s, r) => s + r.roadmapOnTimeRate, 0);
+    // NEW-3 fix: use sum-of-counts (weighted mean), not simple mean of per-period percentages.
+    const allCovered = rows.reduce((s, r) => s + r.coveredIssues, 0);
+    const allTotal = rows.reduce((s, r) => s + r.totalIssues, 0);
+    const allLinked = rows.reduce((s, r) => s + r.linkedCount, 0);
     return {
-      avgCoverage: totalCoverage / rows.length,
-      avgOnTimeRate: totalOnTime / rows.length,
+      avgCoverage: allTotal > 0 ? Math.round((allCovered / allTotal) * 10000) / 100 : 0,
+      avgOnTimeRate: allLinked > 0 ? Math.round((allCovered / allLinked) * 10000) / 100 : 0,
     };
   }, [isKanban, kanbanPeriod, kanbanWeekData, rawData, quarterRows, periodType]);
 

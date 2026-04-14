@@ -27,3 +27,4 @@
 | [0023](0023-board-roadmap-yaml-config.md) | Board and Roadmap Configuration via YAML Files | Accepted | 2026-04-14 |
 | [0024](0024-unplanned-done-tickets-report.md) | Unplanned Done Tickets Report | Accepted | 2026-04-14 |
 | [0025](0025-unplanned-done-in-sprint-reports.md) | Never-Boarded Tickets in Sprint Reports and Kanban Equivalents | Proposed | 2026-04-14 |
+| [0026](0026-metric-fixes-validation-report.md) | Metric Calculation Fixes: Post-Implementation Validation Report | Informational | 2026-04-14 |

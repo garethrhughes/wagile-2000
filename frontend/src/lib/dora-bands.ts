@@ -28,7 +28,7 @@ export function classifyDeploymentFrequency(deploymentsPerDay: number): DoraBand
  * Low    : ≥ 30 days
  */
 export function classifyLeadTime(medianDays: number): DoraBand {
-  if (medianDays <= 1) return 'elite';
+  if (medianDays < 1) return 'elite';
   if (medianDays <= 7) return 'high';
   if (medianDays <= 30) return 'medium';
   return 'low';

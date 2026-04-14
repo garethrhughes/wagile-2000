@@ -31,6 +31,11 @@ export interface RoadmapSprintAccuracy {
   totalIssues: number;
   coveredIssues: number;
   uncoveredIssues: number;
+  /**
+   * Number of issues linked to a roadmap idea (green + amber).
+   * Used by the frontend to compute a weighted on-time rate denominator.
+   */
+  linkedCount: number;
   roadmapCoverage: number;
   /**
    * On-time delivery rate: green ÷ (green + amber).
@@ -478,6 +483,7 @@ export class RoadmapService {
         totalIssues,
         coveredIssues: coveredCount,
         uncoveredIssues: totalIssues - coveredCount,
+        linkedCount: totalLinkedKanban,
         roadmapCoverage:
           totalIssues > 0
             ? Math.round((coveredCount / totalIssues) * 10000) / 100
@@ -824,6 +830,7 @@ export class RoadmapService {
         totalIssues,
         coveredIssues: coveredCount,
         uncoveredIssues: totalIssues - coveredCount,
+        linkedCount: totalLinkedWeekly,
         roadmapCoverage:
           totalIssues > 0
             ? Math.round((coveredCount / totalIssues) * 10000) / 100
@@ -947,6 +954,7 @@ export class RoadmapService {
       totalIssues,
       coveredIssues: coveredCount,
       uncoveredIssues,
+      linkedCount: totalLinkedIssues,
       roadmapCoverage,
       roadmapOnTimeRate,
     };
@@ -961,6 +969,7 @@ export class RoadmapService {
       totalIssues: 0,
       coveredIssues: 0,
       uncoveredIssues: 0,
+      linkedCount: 0,
       roadmapCoverage: 0,
       roadmapOnTimeRate: 0,
     };
