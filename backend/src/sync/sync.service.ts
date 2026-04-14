@@ -287,11 +287,19 @@ export class SyncService {
     issue.sprintId = sprintId;
     issue.createdAt = new Date(raw.fields.created);
 
-    // Attempt to extract story points from common field names
+    // Attempt to extract story points from common field names.
+    // Different Jira project types use different custom field IDs:
+    //   customfield_10016 — "Story point estimate" (classic projects)
+    //   customfield_10026 — "Story Points" (classic projects, older)
+    //   customfield_10028 — "Story Points" (some cloud instances)
+    //   customfield_11031 — "Story point estimate" (next-gen / team-managed)
+    //   story_points      — legacy Jira Server field name
     const storyPointFields = [
       'story_points',
       'customfield_10016',
+      'customfield_10026',
       'customfield_10028',
+      'customfield_11031',
     ];
     for (const field of storyPointFields) {
       const value = raw.fields[field];
