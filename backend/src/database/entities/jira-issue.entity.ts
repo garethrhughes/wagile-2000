@@ -43,6 +43,9 @@ export class JiraIssue {
   @Column({ type: 'varchar', nullable: true, default: null })
   priority!: string | null;
 
+  @Column({ type: 'varchar', nullable: true, default: null })
+  assignee!: string | null;
+
   @Column({ type: 'timestamptz' })
   createdAt!: Date;
 

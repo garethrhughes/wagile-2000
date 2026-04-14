@@ -25,3 +25,4 @@
 | [0021](0021-dora-metrics-calculation-reference.md) | DORA Metrics Calculation Reference | Informational | 2026-04-13 |
 | [0022](0022-sprint-report.md) | Sprint Report: Composite Scoring, Recommendations & Trend | Proposed | 2026-04-13 |
 | [0023](0023-board-roadmap-yaml-config.md) | Board and Roadmap Configuration via YAML Files | Accepted | 2026-04-14 |
+| [0024](0024-unplanned-done-tickets-report.md) | Unplanned Done Tickets Report | Draft | 2026-04-14 |

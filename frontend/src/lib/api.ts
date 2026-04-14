@@ -799,6 +799,54 @@ export function getGaps(): Promise<GapsResponse> {
   return apiFetch<GapsResponse>('/api/gaps')
 }
 
+// ---- Unplanned Done Tickets types and endpoint ---------------------------
+
+export interface UnplannedDoneIssue {
+  key: string
+  summary: string
+  issueType: string
+  boardId: string
+  resolvedAt: string
+  resolvedStatus: string
+  points: number | null
+  epicKey: string | null
+  priority: string | null
+  assignee: string | null
+  labels: string[]
+  jiraUrl: string
+}
+
+export interface UnplannedDoneSummary {
+  total: number
+  totalPoints: number
+  byIssueType: Record<string, number>
+}
+
+export interface UnplannedDoneResponse {
+  boardId: string
+  window: { start: string; end: string }
+  issues: UnplannedDoneIssue[]
+  summary: UnplannedDoneSummary
+}
+
+export interface UnplannedDoneParams {
+  boardId: string
+  sprintId?: string
+  quarter?: string
+}
+
+export function getUnplannedDone(
+  params: UnplannedDoneParams,
+): Promise<UnplannedDoneResponse> {
+  return apiFetch(
+    `/api/gaps/unplanned-done${toQueryString({
+      boardId: params.boardId,
+      sprintId: params.sprintId,
+      quarter: params.quarter,
+    })}`,
+  )
+}
+
 // ---- App config endpoint -------------------------------------------------
 
 export interface AppConfig {

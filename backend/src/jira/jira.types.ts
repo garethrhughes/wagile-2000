@@ -44,6 +44,7 @@ export interface JiraIssueValue {
     parent?: JiraParentField;
     customfield_10014?: string;
     priority?: { name: string };
+    assignee?: { displayName: string } | null;
   };
 }
 

@@ -282,6 +282,7 @@ export class SyncService {
         : null;
     issue.labels = raw.fields.labels ?? [];
     issue.priority = raw.fields.priority?.name ?? null;
+    issue.assignee = raw.fields.assignee?.displayName ?? null;
     issue.boardId = boardId;
     issue.sprintId = sprintId;
     issue.createdAt = new Date(raw.fields.created);

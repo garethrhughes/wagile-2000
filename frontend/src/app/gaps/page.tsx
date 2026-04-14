@@ -8,6 +8,7 @@ import { BoardChip } from '@/components/ui/board-chip'
 import { DataTable, type Column } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { NoBoardsConfigured } from '@/components/ui/no-boards-configured'
+import { UnplannedDoneSection } from './unplanned-done-section'
 
 // ---------------------------------------------------------------------------
 // Collapsible section
@@ -143,6 +144,7 @@ export default function GapsPage() {
   const [selectedBoard, setSelectedBoard] = useState<string | null>(null)
 
   const allBoards = useBoardsStore((s) => s.allBoards)
+  const kanbanBoardIds = useBoardsStore((s) => s.kanbanBoardIds)
   const boardsStatus = useBoardsStore((s) => s.status)
 
   useEffect(() => {
@@ -259,6 +261,11 @@ export default function GapsPage() {
           <DataTable<GapIssue> columns={columns} data={filteredNoEstimate} />
         </CollapsibleSection>
       )}
+
+      <UnplannedDoneSection
+        selectedBoard={selectedBoard}
+        isKanban={selectedBoard !== null && kanbanBoardIds.has(selectedBoard)}
+      />
     </div>
   )
 }
