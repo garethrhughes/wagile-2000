@@ -1,0 +1,45 @@
+# config/roadmap.example.yaml
+#
+# Annotated template for roadmap.yaml.
+# Copy this file to roadmap.yaml and edit the roadmaps list to match your deployment.
+#
+# YAML structure: a top-level `roadmaps` list where each entry defines one JPD
+# (Jira Product Discovery) project configuration.
+#
+# Field reference:
+#
+#   jpdKey (required)
+#     The Jira Product Discovery project key (e.g. DISC, STRAT).
+#     Must be unique within the file.
+#
+#   description (optional)
+#     A human-readable label for this roadmap. Displayed in the Settings UI.
+#     Default: null
+#
+#   startDateFieldId (optional)
+#     The Jira custom field ID that stores the roadmap item start date.
+#     Find this in Jira Administration → Custom Fields, or by inspecting the
+#     JPD issue API response (e.g. "customfield_10015").
+#     Null means the start date is not mapped; ideas without a start date are
+#     excluded from roadmap coverage calculations.
+#     Default: null
+#
+#   targetDateFieldId (optional)
+#     The Jira custom field ID that stores the roadmap item target/delivery date.
+#     Same discovery method as startDateFieldId (e.g. "customfield_10021").
+#     Null means the target date is not mapped; ideas without a target date are
+#     excluded from roadmap coverage calculations.
+#     Default: null
+
+roadmaps:
+  # --- Example: Discovery roadmap with date fields configured ---
+  - jpdKey: DISC
+    description: "Discovery roadmap"
+    startDateFieldId: "customfield_10015"
+    targetDateFieldId: "customfield_10021"
+
+  # --- Example: Strategic initiatives without date fields (dates managed in UI) ---
+  - jpdKey: STRAT
+    description: "Strategic initiatives"
+    startDateFieldId: null
+    targetDateFieldId: null

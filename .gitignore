@@ -32,3 +32,9 @@ coverage/
 
 # TypeScript incremental
 *.tsbuildinfo
+
+# Live board/roadmap YAML config files (contain deployment-specific values).
+# The *.example.yaml annotated templates ARE tracked in git.
+backend/config/boards.yaml
+backend/config/roadmap.yaml
+

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import { useReplaceParams } from '@/hooks/use-page-params'
@@ -139,6 +139,14 @@ function TrendChart({ title, data, dataKey, unit, color }: TrendChartProps) {
 // ---------------------------------------------------------------------------
 
 export default function DoraPage() {
+  return (
+    <Suspense>
+      <DoraPageInner />
+    </Suspense>
+  )
+}
+
+function DoraPageInner() {
   const searchParams = useSearchParams()
   const replaceParams = useReplaceParams()
 

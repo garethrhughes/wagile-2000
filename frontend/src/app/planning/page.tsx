@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Loader2 } from 'lucide-react'
@@ -262,6 +262,14 @@ function renderDeliveryRate(value: unknown) {
 // ---------------------------------------------------------------------------
 
 export default function PlanningPage() {
+  return (
+    <Suspense>
+      <PlanningPageInner />
+    </Suspense>
+  )
+}
+
+function PlanningPageInner() {
   const searchParams = useSearchParams()
   const replaceParams = useReplaceParams()
 

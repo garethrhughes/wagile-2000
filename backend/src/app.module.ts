@@ -17,6 +17,8 @@ import { GapsModule } from './gaps/gaps.module.js';
 import { AppConfigModule } from './config/config.module.js';
 import { SprintReportModule } from './sprint-report/sprint-report.module.js';
 
+// YamlConfigModule is intentionally NOT imported here directly.
+// AppConfigModule already imports and re-exports YamlConfigModule.
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),

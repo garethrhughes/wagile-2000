@@ -1,0 +1,132 @@
+# config/boards.example.yaml
+#
+# Annotated template for boards.yaml.
+# Copy this file to boards.yaml and edit the boards list to match your deployment.
+#
+# YAML structure: a top-level `boards` list where each entry defines one Jira board.
+#
+# Field reference:
+#
+#   boardId (required)
+#     The Jira project key for this board (e.g. ACC, PLAT).
+#     Must be unique within the file. Normalised to UPPERCASE on load.
+#
+#   boardType (required)
+#     Board type: "scrum" (sprint-based) or "kanban" (flow-based).
+#     Planning accuracy reports are unavailable for kanban boards.
+#
+#   doneStatusNames (optional)
+#     Status names that count as "completed" for DORA deployment detection and
+#     lead-time calculation. Default: ["Done", "Closed", "Released"]
+#
+#   inProgressStatusNames (optional)
+#     Status names that mark the start of active work (cycle-time start event).
+#     Default: ["In Progress"]
+#
+#   cancelledStatusNames (optional)
+#     Status names for cancelled/abandoned issues. These are excluded from
+#     roadmap coverage calculations. Default: ["Cancelled", "Won't Do"]
+#
+#   failureIssueTypes (optional)
+#     Issue types counted as failures for Change Failure Rate (CFR).
+#     Default: ["Bug", "Incident"]
+#
+#   failureLinkTypes (optional)
+#     Issue link types that indicate a deployment failure relationship.
+#     Default: ["is caused by", "caused by"]
+#
+#   failureLabels (optional)
+#     Jira labels that mark an issue as a deployment failure.
+#     Default: ["regression", "incident", "hotfix"]
+#
+#   incidentIssueTypes (optional)
+#     Issue types counted as production incidents for MTTR calculation.
+#     Default: ["Bug", "Incident"]
+#
+#   recoveryStatusNames (optional)
+#     Status names that mark recovery from an incident (MTTR end event).
+#     Default: ["Done", "Resolved"]
+#
+#   incidentLabels (optional)
+#     Labels that additionally mark an issue as a production incident.
+#     Default: []
+#
+#   incidentPriorities (optional)
+#     Issue priorities that qualify an issue as a production incident.
+#     Default: ["Critical"]
+#
+#   backlogStatusIds (optional)
+#     Status IDs (not names) representing the pre-board backlog state for
+#     Kanban boards. Issues with a current statusId in this list are excluded
+#     from flow metrics. When empty, the fallback heuristic is used (any issue
+#     with no status changelog is treated as backlog). Default: []
+#
+#   dataStartDate (optional)
+#     ISO date string (YYYY-MM-DD) or null. Hard lower bound for Kanban flow
+#     metrics — issues whose board-entry date is before this date are excluded.
+#     Null means no lower bound. Default: null
+
+boards:
+  # --- Scrum board example ---
+  - boardId: ACC
+    boardType: scrum
+    doneStatusNames:
+      - Done
+      - Closed
+      - Released
+    inProgressStatusNames:
+      - In Progress
+      - In Development
+    cancelledStatusNames:
+      - Cancelled
+      - "Won't Do"
+    failureIssueTypes:
+      - Bug
+      - Incident
+    failureLinkTypes:
+      - "is caused by"
+      - "caused by"
+    failureLabels:
+      - regression
+      - incident
+      - hotfix
+    incidentIssueTypes:
+      - Bug
+      - Incident
+    recoveryStatusNames:
+      - Done
+      - Resolved
+    incidentLabels: []
+    incidentPriorities:
+      - Critical
+    backlogStatusIds: []
+    dataStartDate: null
+
+  # --- Kanban board example ---
+  - boardId: PLAT
+    boardType: kanban
+    doneStatusNames:
+      - Done
+      - Released
+    inProgressStatusNames:
+      - In Progress
+    cancelledStatusNames:
+      - Cancelled
+    failureIssueTypes:
+      - Bug
+    failureLinkTypes:
+      - "is caused by"
+    failureLabels:
+      - regression
+    incidentIssueTypes:
+      - Bug
+    recoveryStatusNames:
+      - Done
+    incidentLabels: []
+    incidentPriorities:
+      - Critical
+    # Backlog status ID from Jira — issues in this status are pre-board
+    backlogStatusIds:
+      - "10303"
+    # Only include issues that entered the board from 2024 onwards
+    dataStartDate: "2024-01-01"

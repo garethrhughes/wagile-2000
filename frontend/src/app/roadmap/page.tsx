@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Loader2 } from 'lucide-react'
@@ -14,7 +14,7 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts'
-import type { ValueType, NameType } from 'recharts'
+import type { TooltipValueType } from 'recharts'
 import {
   getRoadmapAccuracy,
   getRoadmapConfigs,
@@ -200,7 +200,7 @@ function TrendChart({ title, data, color, unit = '' }: TrendChartProps) {
             tickFormatter={(v: number) => `${v}${unit}`}
           />
           <Tooltip
-            formatter={(value: ValueType | undefined, name: NameType | undefined): [string, string] => [
+            formatter={(value: TooltipValueType | undefined, name: number | string | undefined): [string, string] => [
               value !== undefined && !Array.isArray(value) ? `${value}${unit}` : '',
               String(name ?? title),
             ]}
@@ -225,6 +225,14 @@ function TrendChart({ title, data, color, unit = '' }: TrendChartProps) {
 // ---------------------------------------------------------------------------
 
 export default function RoadmapPage() {
+  return (
+    <Suspense>
+      <RoadmapPageInner />
+    </Suspense>
+  )
+}
+
+function RoadmapPageInner() {
   const searchParams = useSearchParams()
   const replaceParams = useReplaceParams()
 

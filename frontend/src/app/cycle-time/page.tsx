@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import { useReplaceParams } from '@/hooks/use-page-params'
@@ -70,6 +70,14 @@ function pooledPercentiles(results: CycleTimeResult[]) {
 // ---------------------------------------------------------------------------
 
 export default function CycleTimePage() {
+  return (
+    <Suspense>
+      <CycleTimePageInner />
+    </Suspense>
+  )
+}
+
+function CycleTimePageInner() {
   const searchParams = useSearchParams()
   const replaceParams = useReplaceParams()
 
