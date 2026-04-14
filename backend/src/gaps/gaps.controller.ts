@@ -22,7 +22,7 @@ export class GapsController {
 
   @ApiOperation({
     summary:
-      'Get unplanned done tickets: work items resolved within the window with no sprint membership at completion time. Returns 400 for Kanban boards.',
+      'Get unplanned done tickets: work items resolved within the window with no sprint membership at completion time. Returns 400 for Kanban boards. Omit boardId (or pass boardId=all) to aggregate across all Scrum boards.',
   })
   @Get('unplanned-done')
   getUnplannedDone(

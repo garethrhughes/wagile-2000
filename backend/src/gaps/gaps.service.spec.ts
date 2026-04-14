@@ -748,5 +748,206 @@ describe('GapsService', () => {
       expect(result.summary.byIssueType['Story']).toBe(2);
       expect(result.summary.byIssueType['Bug']).toBe(1);
     });
+
+    // ── "All boards" aggregation path ───────────────────────────────────────
+
+    describe('all boards aggregation (boardId = undefined / "all")', () => {
+      const scrumConfig2 = {
+        boardId: 'BPT',
+        boardType: 'scrum',
+        doneStatusNames: ['Done'],
+        cancelledStatusNames: ['Cancelled'],
+      } as BoardConfig;
+
+      /**
+       * Build a query builder mock that inspects the `field` argument passed to
+       * `.andWhere('cl.field = :field', { field })` to determine whether the
+       * caller wants status or Sprint changelogs, then returns the appropriate
+       * list.  This is resilient to call-order interleaving from Promise.all.
+       */
+      function mockQbByField(
+        statusChangelogs: JiraChangelog[],
+        sprintChangelogs: JiraChangelog[],
+      ) {
+        let capturedField: string | undefined;
+        const qb = {
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockImplementation((_clause: string, params: { field?: string }) => {
+            if (params?.field) capturedField = params.field;
+            return qb;
+          }),
+          orderBy: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockImplementation(() => {
+            return Promise.resolve(
+              capturedField === 'Sprint' ? sprintChangelogs : statusChangelogs,
+            );
+          }),
+        };
+        return qb;
+      }
+
+      it('returns boardId "all" and empty issues when no Scrum boards configured', async () => {
+        boardConfigRepo.find.mockResolvedValue([kanbanConfig]);
+        issueRepo.find.mockResolvedValue([]);
+
+        const result = await service.getUnplannedDone(undefined);
+
+        expect(result.boardId).toBe('all');
+        expect(result.issues).toHaveLength(0);
+        expect(result.summary.total).toBe(0);
+      });
+
+      it('returns boardId "all" when called with sentinel string "all"', async () => {
+        boardConfigRepo.find.mockResolvedValue([]);
+        issueRepo.find.mockResolvedValue([]);
+
+        const result = await service.getUnplannedDone('all');
+
+        expect(result.boardId).toBe('all');
+      });
+
+      it('aggregates issues from multiple Scrum boards, skipping Kanban', async () => {
+        boardConfigRepo.find.mockResolvedValue([scrumConfig, kanbanConfig, scrumConfig2]);
+        boardConfigRepo.findOne.mockImplementation(({ where }: { where: { boardId: string } }) => {
+          if (where.boardId === 'ACC') return Promise.resolve(scrumConfig);
+          if (where.boardId === 'BPT') return Promise.resolve(scrumConfig2);
+          return Promise.resolve(null);
+        });
+
+        // Each board's issueRepo.find returns that board's issues
+        issueRepo.find.mockImplementation(({ where }: { where: { boardId: string } }) => {
+          if (where.boardId === 'ACC') {
+            return Promise.resolve([makeIssue({ key: 'ACC-1', boardId: 'ACC', status: 'In Progress' })]);
+          }
+          if (where.boardId === 'BPT') {
+            return Promise.resolve([makeIssue({ key: 'BPT-1', boardId: 'BPT', status: 'In Progress' })]);
+          }
+          return Promise.resolve([]);
+        });
+
+        // createQueryBuilder returns a field-aware mock each time it's invoked
+        changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() =>
+          mockQbByField(
+            // status changelogs: include entries for both boards — the service
+            // passes its own issue keys to `where IN (...)` but our mock ignores
+            // that clause, so we include all possible keys; only the matching
+            // board's issues exist in allIssues so only the relevant entry is used
+            [
+              makeChangelog({ id: 1, issueKey: 'ACC-1', toValue: 'Done', changedAt: IN_WINDOW }),
+              makeChangelog({ id: 2, issueKey: 'BPT-1', toValue: 'Done', changedAt: IN_WINDOW }),
+            ],
+            [], // no sprint changelogs → both are unplanned
+          ),
+        );
+
+        const result = await service.getUnplannedDone(undefined);
+
+        expect(result.boardId).toBe('all');
+        expect(result.issues).toHaveLength(2);
+        expect(result.issues.map((i) => i.key).sort()).toEqual(['ACC-1', 'BPT-1']);
+        expect(result.summary.total).toBe(2);
+      });
+
+      it('uses last-90-days window when no quarter supplied', async () => {
+        boardConfigRepo.find.mockResolvedValue([scrumConfig]);
+        boardConfigRepo.findOne.mockResolvedValue(scrumConfig);
+        issueRepo.find.mockResolvedValue([]);
+
+        const before = new Date();
+        before.setDate(before.getDate() - 90);
+
+        const result = await service.getUnplannedDone(undefined);
+
+        const windowStart = new Date(result.window.start);
+        // Allow 5-second tolerance for test execution time
+        expect(Math.abs(windowStart.getTime() - before.getTime())).toBeLessThan(5000);
+        expect(result.boardId).toBe('all');
+      });
+
+      it('uses quarter window when quarter is supplied', async () => {
+        boardConfigRepo.find.mockResolvedValue([scrumConfig]);
+        boardConfigRepo.findOne.mockResolvedValue(scrumConfig);
+        issueRepo.find.mockResolvedValue([]);
+
+        const result = await service.getUnplannedDone(undefined, undefined, '2026-Q1');
+
+        expect(result.window.start).toContain('2026-01-01');
+        expect(result.boardId).toBe('all');
+      });
+
+      it('sorts merged results by resolvedAt DESC, then key ASC for ties', async () => {
+        boardConfigRepo.find.mockResolvedValue([scrumConfig, scrumConfig2]);
+        boardConfigRepo.findOne.mockImplementation(({ where }: { where: { boardId: string } }) => {
+          if (where.boardId === 'ACC') return Promise.resolve(scrumConfig);
+          if (where.boardId === 'BPT') return Promise.resolve(scrumConfig2);
+          return Promise.resolve(null);
+        });
+
+        const earlier = new Date('2026-02-10T10:00:00Z');
+        const later = new Date('2026-03-20T10:00:00Z');
+
+        issueRepo.find.mockImplementation(({ where }: { where: { boardId: string } }) => {
+          if (where.boardId === 'ACC') {
+            return Promise.resolve([makeIssue({ key: 'ACC-5', boardId: 'ACC', status: 'In Progress' })]);
+          }
+          if (where.boardId === 'BPT') {
+            return Promise.resolve([makeIssue({ key: 'BPT-2', boardId: 'BPT', status: 'In Progress' })]);
+          }
+          return Promise.resolve([]);
+        });
+
+        changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() =>
+          mockQbByField(
+            [
+              makeChangelog({ id: 1, issueKey: 'ACC-5', toValue: 'Done', changedAt: later }),
+              makeChangelog({ id: 2, issueKey: 'BPT-2', toValue: 'Done', changedAt: earlier }),
+            ],
+            [],
+          ),
+        );
+
+        const result = await service.getUnplannedDone(undefined);
+
+        expect(result.issues).toHaveLength(2);
+        expect(result.issues[0].key).toBe('ACC-5'); // later resolvedAt first
+        expect(result.issues[1].key).toBe('BPT-2');
+      });
+
+      it('computes summary correctly across boards', async () => {
+        boardConfigRepo.find.mockResolvedValue([scrumConfig, scrumConfig2]);
+        boardConfigRepo.findOne.mockImplementation(({ where }: { where: { boardId: string } }) => {
+          if (where.boardId === 'ACC') return Promise.resolve(scrumConfig);
+          if (where.boardId === 'BPT') return Promise.resolve(scrumConfig2);
+          return Promise.resolve(null);
+        });
+
+        issueRepo.find.mockImplementation(({ where }: { where: { boardId: string } }) => {
+          if (where.boardId === 'ACC') {
+            return Promise.resolve([makeIssue({ key: 'ACC-1', boardId: 'ACC', issueType: 'Story', points: 5 })]);
+          }
+          if (where.boardId === 'BPT') {
+            return Promise.resolve([makeIssue({ key: 'BPT-1', boardId: 'BPT', issueType: 'Bug', points: 2 })]);
+          }
+          return Promise.resolve([]);
+        });
+
+        changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() =>
+          mockQbByField(
+            [
+              makeChangelog({ id: 1, issueKey: 'ACC-1', toValue: 'Done', changedAt: IN_WINDOW }),
+              makeChangelog({ id: 2, issueKey: 'BPT-1', toValue: 'Done', changedAt: IN_WINDOW }),
+            ],
+            [],
+          ),
+        );
+
+        const result = await service.getUnplannedDone(undefined);
+
+        expect(result.summary.total).toBe(2);
+        expect(result.summary.totalPoints).toBe(7);
+        expect(result.summary.byIssueType['Story']).toBe(1);
+        expect(result.summary.byIssueType['Bug']).toBe(1);
+      });
+    });
   });
 });

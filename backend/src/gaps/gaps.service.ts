@@ -149,6 +149,75 @@ export class GapsService {
   }
 
   async getUnplannedDone(
+    boardId: string | undefined,
+    sprintId?: string,
+    quarter?: string,
+  ): Promise<UnplannedDoneResponse> {
+    // "All boards" mode: boardId is absent or explicitly set to the sentinel "all"
+    const isAllBoards = !boardId || boardId === 'all';
+
+    if (isAllBoards) {
+      return this.getUnplannedDoneAllBoards(quarter);
+    }
+
+    return this.getUnplannedDoneSingleBoard(boardId, sprintId, quarter);
+  }
+
+  /**
+   * Aggregate unplanned done tickets across all configured Scrum boards.
+   * Kanban boards are silently skipped (they have no sprint membership data).
+   * sprintId is not supported in all-boards mode — use quarter or last-90-days.
+   */
+  private async getUnplannedDoneAllBoards(
+    quarter?: string,
+  ): Promise<UnplannedDoneResponse> {
+    // Determine date window
+    let windowStart: Date;
+    let windowEnd: Date;
+
+    if (quarter) {
+      const { startDate, endDate } = quarterToDates(quarter);
+      windowStart = startDate;
+      windowEnd = endDate;
+    } else {
+      // Default: last 90 days
+      windowEnd = new Date();
+      windowStart = new Date();
+      windowStart.setDate(windowStart.getDate() - 90);
+    }
+
+    // Load all board configs; skip Kanban boards
+    const allConfigs = await this.boardConfigRepo.find();
+    const scrumConfigs = allConfigs.filter((c) => c.boardType !== 'kanban');
+
+    if (scrumConfigs.length === 0) {
+      return this.buildResponse('all', windowStart, windowEnd, []);
+    }
+
+    // Collect results from each Scrum board in parallel
+    const perBoardResults = await Promise.all(
+      scrumConfigs.map((cfg) =>
+        this.getUnplannedDoneSingleBoard(cfg.boardId, undefined, quarter).then(
+          (r) => r.issues,
+        ),
+      ),
+    );
+
+    // Merge and sort
+    const merged: UnplannedDoneIssue[] = ([] as UnplannedDoneIssue[]).concat(
+      ...perBoardResults,
+    );
+    merged.sort((a, b) => {
+      const timeDiff =
+        new Date(b.resolvedAt).getTime() - new Date(a.resolvedAt).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return a.key.localeCompare(b.key);
+    });
+
+    return this.buildResponse('all', windowStart, windowEnd, merged);
+  }
+
+  private async getUnplannedDoneSingleBoard(
     boardId: string,
     sprintId?: string,
     quarter?: string,

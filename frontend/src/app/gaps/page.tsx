@@ -144,7 +144,6 @@ export default function GapsPage() {
   const [selectedBoard, setSelectedBoard] = useState<string | null>(null)
 
   const allBoards = useBoardsStore((s) => s.allBoards)
-  const kanbanBoardIds = useBoardsStore((s) => s.kanbanBoardIds)
   const boardsStatus = useBoardsStore((s) => s.status)
 
   useEffect(() => {
@@ -262,10 +261,7 @@ export default function GapsPage() {
         </CollapsibleSection>
       )}
 
-      <UnplannedDoneSection
-        selectedBoard={selectedBoard}
-        isKanban={selectedBoard !== null && kanbanBoardIds.has(selectedBoard)}
-      />
+      <UnplannedDoneSection />
     </div>
   )
 }

@@ -830,7 +830,8 @@ export interface UnplannedDoneResponse {
 }
 
 export interface UnplannedDoneParams {
-  boardId: string
+  /** Board ID to filter by. Omit (or pass undefined) to aggregate all Scrum boards. */
+  boardId?: string
   sprintId?: string
   quarter?: string
 }

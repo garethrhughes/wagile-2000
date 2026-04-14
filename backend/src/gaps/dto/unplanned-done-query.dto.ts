@@ -1,11 +1,14 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsString } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UnplannedDoneQueryDto {
-  @ApiProperty({ description: 'Board identifier (e.g. ACC, BPT)' })
-  @IsNotEmpty()
+  @ApiPropertyOptional({
+    description:
+      'Board identifier (e.g. ACC, BPT). Omit or pass "all" to aggregate across all Scrum boards.',
+  })
+  @IsOptional()
   @IsString()
-  boardId!: string;
+  boardId?: string;
 
   @ApiPropertyOptional({ description: 'Sprint ID to scope the report to' })
   @IsOptional()
