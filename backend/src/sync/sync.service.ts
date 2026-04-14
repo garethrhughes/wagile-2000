@@ -364,8 +364,11 @@ export class SyncService {
   }
 
   private async syncChangelogsBulk(issueKeys: string[]): Promise<void> {
-    // Process in batches to avoid N+1 but also not overload API
-    const batchSize = 20;
+    // Process in small batches so Promise.all does not spike beyond the
+    // JiraClientService concurrency limit (MAX_CONCURRENT_REQUESTS = 5).
+    // The client-level semaphore is the authoritative cap; keeping batchSize
+    // equal to it avoids queuing unnecessary promises.
+    const batchSize = 5;
     for (let i = 0; i < issueKeys.length; i += batchSize) {
       const batch = issueKeys.slice(i, i + batchSize);
       const promises = batch.map((key) => this.syncIssueChangelog(key));

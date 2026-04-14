@@ -17,7 +17,7 @@ function mockConfigService(): jest.Mocked<ConfigService> {
 }
 
 function mockFetch(
-  responses: Array<{ status: number; ok: boolean; json?: object; text?: string }>,
+  responses: Array<{ status: number; ok: boolean; json?: object; text?: string; headers?: Record<string, string> }>,
 ): jest.Mock {
   let callCount = 0;
   return jest.fn().mockImplementation(async () => {
@@ -28,6 +28,9 @@ function mockFetch(
       ok: resp.ok,
       json: async () => resp.json ?? {},
       text: async () => resp.text ?? '',
+      headers: {
+        get: (name: string) => resp.headers?.[name.toLowerCase()] ?? null,
+      },
     };
   });
 }
@@ -296,9 +299,17 @@ describe('JiraClientService', () => {
       globalFetch.mockImplementation(async () => {
         callCount++;
         if (callCount === 1) {
-          return { status: 429, ok: false, json: async () => ({}), text: async () => '' };
+          return {
+            status: 429, ok: false,
+            json: async () => ({}), text: async () => '',
+            headers: { get: () => null },
+          };
         }
-        return { status: 200, ok: true, json: async () => successPayload, text: async () => '' };
+        return {
+          status: 200, ok: true,
+          json: async () => successPayload, text: async () => '',
+          headers: { get: () => null },
+        };
       });
 
       // Override sleep to avoid actual delay
@@ -310,22 +321,83 @@ describe('JiraClientService', () => {
       expect(globalFetch).toHaveBeenCalledTimes(2);
     });
 
-    it('throws after MAX_RETRIES (3) consecutive 429s', async () => {
+    it('throws after MAX_RETRIES (5) consecutive 429s', async () => {
       globalFetch.mockImplementation(async () => ({
         status: 429,
         ok: false,
         json: async () => ({}),
         text: async () => '',
+        headers: { get: () => null },
       }));
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
 
       await expect(service.getSprints('1')).rejects.toThrow(
-        /rate limit exceeded after 3 retries/,
+        /rate limit exceeded after 5 retries/,
       );
-      // 1 initial + 3 retries = 4 calls total
-      expect(globalFetch).toHaveBeenCalledTimes(4);
+      // 1 initial + 5 retries = 6 calls total
+      expect(globalFetch).toHaveBeenCalledTimes(6);
+    });
+
+    it('uses Retry-After header delay when present on 429', async () => {
+      const successPayload = { issues: [] };
+      let callCount = 0;
+      globalFetch.mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            status: 429, ok: false,
+            json: async () => ({}), text: async () => '',
+            headers: { get: (name: string) => name.toLowerCase() === 'retry-after' ? '30' : null },
+          };
+        }
+        return {
+          status: 200, ok: true,
+          json: async () => successPayload, text: async () => '',
+          headers: { get: () => null },
+        };
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sleepSpy = jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
+
+      const result = await service.getSprints('1');
+      expect(result).toEqual(successPayload);
+
+      // sleep should have been called with 30_000 ms (30 seconds from header)
+      const sleepCalls = sleepSpy.mock.calls.filter((args) => (args[0] as number) >= 30000);
+      expect(sleepCalls.length).toBeGreaterThanOrEqual(1);
+      expect(sleepCalls[0][0]).toBe(30000);
+    });
+
+    it('falls back to exponential backoff when Retry-After header is absent', async () => {
+      const successPayload = { issues: [] };
+      let callCount = 0;
+      globalFetch.mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            status: 429, ok: false,
+            json: async () => ({}), text: async () => '',
+            headers: { get: () => null },
+          };
+        }
+        return {
+          status: 200, ok: true,
+          json: async () => successPayload, text: async () => '',
+          headers: { get: () => null },
+        };
+      });
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sleepSpy = jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
+
+      await service.getSprints('1');
+
+      // For attempt=0 the exponential backoff delay is BASE_DELAY_MS * 2^0 = 1000 ms
+      const rateLimitSleeps = sleepSpy.mock.calls.filter((args) => (args[0] as number) === 1000);
+      expect(rateLimitSleeps.length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -340,6 +412,7 @@ describe('JiraClientService', () => {
         ok: false,
         json: async () => ({}),
         text: async () => 'Unauthorized',
+        headers: { get: () => null },
       }));
 
       await expect(service.getSprints('1')).rejects.toThrow(/Jira API error 401/);
@@ -352,6 +425,7 @@ describe('JiraClientService', () => {
         ok: false,
         json: async () => ({}),
         text: async () => 'Internal Server Error',
+        headers: { get: () => null },
       }));
 
       await expect(service.getSprints('1')).rejects.toThrow(/Jira API error 500/);
@@ -368,7 +442,11 @@ describe('JiraClientService', () => {
       globalFetch.mockImplementation(async () => {
         callCount++;
         if (callCount === 1) throw new TypeError('Failed to fetch');
-        return { status: 200, ok: true, json: async () => ({ issues: [] }), text: async () => '' };
+        return {
+          status: 200, ok: true,
+          json: async () => ({ issues: [] }), text: async () => '',
+          headers: { get: () => null },
+        };
       });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -388,7 +466,8 @@ describe('JiraClientService', () => {
       jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
 
       await expect(service.getSprints('1')).rejects.toThrow(TypeError);
-      expect(globalFetch).toHaveBeenCalledTimes(4);
+      // 1 initial + 5 retries = 6 calls total
+      expect(globalFetch).toHaveBeenCalledTimes(6);
     });
 
     it('re-throws non-TypeError errors immediately without retry', async () => {
@@ -398,6 +477,103 @@ describe('JiraClientService', () => {
 
       await expect(service.getSprints('1')).rejects.toThrow('Some other error');
       expect(globalFetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Concurrency semaphore — MAX_CONCURRENT_REQUESTS = 5
+  // -------------------------------------------------------------------------
+
+  describe('concurrency semaphore', () => {
+    it('never exceeds MAX_CONCURRENT_REQUESTS (5) simultaneous in-flight requests', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      jest.spyOn(service as any, 'enforceMinInterval').mockResolvedValue(undefined);
+
+      let maxObservedInFlight = 0;
+      let currentInFlight = 0;
+
+      // Each fetch increments a counter, records the peak, then resolves.
+      globalFetch.mockImplementation(
+        () =>
+          new Promise<object>((resolve) => {
+            currentInFlight++;
+            if (currentInFlight > maxObservedInFlight) {
+              maxObservedInFlight = currentInFlight;
+            }
+            // Resolve on the next microtask so all promises have time to queue.
+            Promise.resolve().then(() => {
+              currentInFlight--;
+              resolve({
+                status: 200,
+                ok: true,
+                json: async () => ({ values: [] }),
+                text: async () => '',
+                headers: { get: () => null },
+              });
+            });
+          }),
+      );
+
+      // Fire 10 concurrent requests (> MAX_CONCURRENT_REQUESTS).
+      const requests = Array.from({ length: 10 }, (_, i) =>
+        service.getSprints(String(i)),
+      );
+      await Promise.all(requests);
+
+      expect(maxObservedInFlight).toBeLessThanOrEqual(5);
+      expect(globalFetch).toHaveBeenCalledTimes(10);
+    });
+
+    it('queued requests are eventually served after in-flight ones complete', async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      jest.spyOn(service as any, 'enforceMinInterval').mockResolvedValue(undefined);
+
+      globalFetch.mockImplementation(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({ values: [] }),
+        text: async () => '',
+        headers: { get: () => null },
+      }));
+
+      // 8 requests: 5 will run immediately, 3 will queue.
+      const results = await Promise.all(
+        Array.from({ length: 8 }, (_, i) => service.getSprints(String(i))),
+      );
+
+      expect(results).toHaveLength(8);
+      expect(globalFetch).toHaveBeenCalledTimes(8);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Inter-request interval — MIN_REQUEST_INTERVAL_MS = 100
+  // -------------------------------------------------------------------------
+
+  describe('inter-request interval', () => {
+    it('calls sleep when consecutive requests arrive faster than MIN_REQUEST_INTERVAL_MS', async () => {
+      globalFetch.mockImplementation(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => ({ values: [] }),
+        text: async () => '',
+        headers: { get: () => null },
+      }));
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sleepSpy = jest.spyOn(service as any, 'sleep').mockResolvedValue(undefined);
+
+      // Force lastRequestAt to be "now" so the second request arrives too soon.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (service as any).lastRequestAt = Date.now();
+
+      await service.getSprints('1');
+
+      // sleep should have been called at least once with a positive value ≤ 100
+      const intervalSleeps = sleepSpy.mock.calls.filter(
+        (args) => (args[0] as number) > 0 && (args[0] as number) <= 100,
+      );
+      expect(intervalSleeps.length).toBeGreaterThanOrEqual(1);
     });
   });
 });
