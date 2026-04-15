@@ -143,7 +143,7 @@ export class QuarterDetailService {
     const doneStatuses: string[] = boardConfig?.doneStatusNames ?? ['Done', 'Closed', 'Released'];
     const incidentIssueTypes: string[] = boardConfig?.incidentIssueTypes ?? ['Bug', 'Incident'];
     const incidentLabels: string[] = boardConfig?.incidentLabels ?? [];
-    const incidentPriorities: string[] = boardConfig?.incidentPriorities ?? ['Critical', 'Highest', 'P1', 'P2'];
+    const incidentPriorities: string[] = boardConfig?.incidentPriorities ?? ['Critical'];
     const failureIssueTypes: string[] = boardConfig?.failureIssueTypes ?? ['Bug', 'Incident'];
     const failureLabels: string[] = boardConfig?.failureLabels ?? ['regression', 'incident', 'hotfix'];
     const failureLinkTypes: string[] = boardConfig?.failureLinkTypes ?? [];

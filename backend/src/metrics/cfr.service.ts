@@ -98,18 +98,13 @@ export class CfrService {
     // We still need the issue keys to determine which issues were released;
     // the deployment COUNT uses release days, but the failure classification
     // must operate on the actual issues (type, labels, links).
-    const versionNames = releasedVersions.map((v) => v.name);
+    // Derive from the already-loaded allIssues to avoid a redundant DB query.
+    const versionNames = new Set(releasedVersions.map((v) => v.name));
     const versionIssueKeys =
-      versionNames.length > 0
+      versionNames.size > 0
         ? new Set(
-            (
-              await this.issueRepo.find({
-                where: { boardId },
-              })
-            )
-              .filter(
-                (i) => isWorkItem(i.issueType) && i.fixVersion != null && versionNames.includes(i.fixVersion),
-              )
+            allIssues
+              .filter((i) => i.fixVersion != null && versionNames.has(i.fixVersion))
               .map((i) => i.key),
           )
         : new Set<string>();

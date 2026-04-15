@@ -240,7 +240,7 @@ export class SprintDetailService {
     const incidentIssueTypes: string[] = boardConfig?.incidentIssueTypes ?? ['Bug', 'Incident'];
     const incidentLabels: string[] = boardConfig?.incidentLabels ?? [];
     const cancelledStatusNames: string[] = boardConfig?.cancelledStatusNames ?? ['Cancelled', "Won't Do"];
-    const incidentPriorities: string[] = boardConfig?.incidentPriorities ?? ['Critical', 'Highest', 'P1', 'P2'];
+    const incidentPriorities: string[] = boardConfig?.incidentPriorities ?? ['Critical'];
 
     const boardConfigShape: SprintDetailBoardConfig = {
       doneStatusNames,

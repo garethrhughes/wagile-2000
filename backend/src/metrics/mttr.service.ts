@@ -158,7 +158,6 @@ export class MttrService {
     // hours, because incident recovery time is an elapsed-time metric — teams
     // respond to incidents around the clock, not just during business hours.
     // WorkingTimeService is therefore intentionally NOT used here.
-    const issueMap = new Map(priorityFilteredIssues.map((i) => [i.key, i]));
     const recoveryHours: number[] = [];
     let openIncidentCount = 0;
     let anomalyCount = 0;
@@ -195,9 +194,6 @@ export class MttrService {
 
       recoveryHours.push(hours);
     }
-
-    // Suppress unused variable warning for issueMap (kept for potential future use)
-    void issueMap;
 
     recoveryHours.sort((a, b) => a - b);
     return { recoveryHours, openIncidentCount, anomalyCount };

@@ -219,19 +219,28 @@ function DoraPageInner() {
     const boardId = selectedBoards.join(',')
 
     const load = async (): Promise<void> => {
-      // Always scope the headline aggregate to the current calendar quarter so
-      // it matches the rightmost point on the trend chart.  Without an explicit
-      // quarter the backend defaults to a rolling 90-day window, which can
-      // include incidents from a previous quarter and produce a headline that
-      // disagrees with every visible chart bar.  (Proposal 0031.)
-      const [aggregate, trend] = await Promise.all([
-        getDoraAggregate({ boardId, quarter: currentQuarterLabel() }),
-        getDoraTrend({
-          boardId,
-          mode: periodType === 'sprint' ? 'sprints' : 'quarters',
-          limit: 8,
-        }),
-      ])
+      // Fetch trend first so we can align the aggregate window to the rightmost
+      // chart point using the server's timezone, not the browser's local date.
+      // Around quarter boundaries, a browser in a different timezone than the
+      // backend's TIMEZONE config can call the wrong quarter and cause the
+      // headline aggregate to disagree with the rightmost chart bar.
+      const trend = await getDoraTrend({
+        boardId,
+        mode: periodType === 'sprint' ? 'sprints' : 'quarters',
+        limit: 8,
+      })
+
+      if (cancelled) return
+
+      // Use the last trend label as the aggregate quarter when it is a
+      // quarter label (server timezone aligned). Fall back to the
+      // browser-derived label when trend data is empty or in sprint mode
+      // (where labels are sprint names, not quarter strings).
+      const lastLabel = trend.length > 0 ? trend[trend.length - 1].label : undefined
+      const aggregateQuarter =
+        lastLabel?.match(/^\d{4}-Q[1-4]$/) != null ? lastLabel : currentQuarterLabel()
+
+      const aggregate = await getDoraAggregate({ boardId, quarter: aggregateQuarter })
 
       if (!cancelled) {
         setPageState({ status: 'ready', aggregate, trend })
