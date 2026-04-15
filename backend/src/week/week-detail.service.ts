@@ -149,6 +149,7 @@ export class WeekDetailService {
     const doneStatuses: string[] = boardConfig?.doneStatusNames ?? ['Done', 'Closed', 'Released'];
     const incidentIssueTypes: string[] = boardConfig?.incidentIssueTypes ?? ['Bug', 'Incident'];
     const incidentLabels: string[] = boardConfig?.incidentLabels ?? [];
+    const incidentPriorities: string[] = boardConfig?.incidentPriorities ?? ['Critical', 'Highest', 'P1', 'P2'];
     const failureIssueTypes: string[] = boardConfig?.failureIssueTypes ?? ['Bug', 'Incident'];
     const failureLabels: string[] = boardConfig?.failureLabels ?? ['regression', 'incident', 'hotfix'];
     const backlogStatusIds: string[] = boardConfig?.backlogStatusIds ?? [];
@@ -284,13 +285,23 @@ export class WeekDetailService {
       const linkedToRoadmap =
         issue.epicKey != null && coveredEpicKeys.has(issue.epicKey);
 
-      // isIncident: must match type/label AND be Critical priority
+      // isIncident: must match type/label AND pass priority AND-gate
+      // (consistent with MttrService; incidentPriorities = [] means all priorities qualify)
       const matchesIncidentTypeOrLabel =
         incidentIssueTypes.includes(issue.issueType) ||
         (incidentLabels.length > 0 && issue.labels.some((l) => incidentLabels.includes(l)));
-      const isIncident = matchesIncidentTypeOrLabel && issue.priority === 'Critical';
+      const isIncident =
+        matchesIncidentTypeOrLabel &&
+        (incidentPriorities.length === 0 ||
+          incidentPriorities.includes(issue.priority ?? ''));
 
       // isFailure
+      // NOTE: The causal-link AND-gate used by CfrService (failureLinkTypes) is
+      // intentionally not applied here.  The week detail view shows all issues
+      // that match failureIssueTypes + incidentPriorities regardless of whether
+      // they carry a causal link to a deployment.  This provides a broader
+      // "incidents in this period" view rather than the strict CFR numerator.
+      // See proposal 0030 §Fix B-5 for rationale.
       const isFailure =
         failureIssueTypes.includes(issue.issueType) ||
         (failureLabels.length > 0 && issue.labels.some((l) => failureLabels.includes(l)));

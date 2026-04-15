@@ -78,8 +78,10 @@ function buildMttrService(): jest.Mocked<MttrService> {
       medianHours: 2,
       band: 'excellent',
       incidentCount: 1,
+      openIncidentCount: 0,
+      anomalyCount: 0,
     }),
-    getMttrObservations: jest.fn().mockResolvedValue([2]),
+    getMttrObservations: jest.fn().mockResolvedValue({ recoveryHours: [2], openIncidentCount: 0, anomalyCount: 0 }),
   } as unknown as jest.Mocked<MttrService>;
 }
 
@@ -265,8 +267,8 @@ describe('MetricsService', () => {
         .mockResolvedValueOnce({ observations: [3, 5], anomalyCount: 0 })
         .mockResolvedValueOnce({ observations: [7, 9], anomalyCount: 0 });
       mttrService.getMttrObservations
-        .mockResolvedValueOnce([2])
-        .mockResolvedValueOnce([4]);
+        .mockResolvedValueOnce({ recoveryHours: [2], openIncidentCount: 0, anomalyCount: 0 })
+        .mockResolvedValueOnce({ recoveryHours: [4], openIncidentCount: 0, anomalyCount: 0 });
 
       const result = await service.getDoraAggregate({ quarter: '2026-Q1' });
 

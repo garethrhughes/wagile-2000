@@ -1,4 +1,4 @@
-import { dateParts, midnightInTz } from './tz-utils.js';
+import { dateParts, midnightInTz, startOfDayInTz } from './tz-utils.js';
 
 describe('dateParts', () => {
   it('returns correct year/month/day in UTC', () => {
@@ -25,6 +25,44 @@ describe('dateParts', () => {
     expect(parts.year).toBe(2025);
     expect(parts.month).toBe(11); // December
     expect(parts.day).toBe(31);
+  });
+});
+
+describe('startOfDayInTz', () => {
+  it('returns midnight UTC for UTC timezone', () => {
+    const result = startOfDayInTz(2026, 0, 1, 'UTC');
+    expect(result.toISOString()).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('returns correct UTC instant for positive-offset timezone (UTC+5:30 India)', () => {
+    // IST is UTC+5:30; midnight IST on Jan 1 2026 = 2025-12-31T18:30:00Z
+    const result = startOfDayInTz(2026, 0, 1, 'Asia/Kolkata');
+    expect(result.toISOString()).toBe('2025-12-31T18:30:00.000Z');
+  });
+
+  it('returns correct UTC instant for negative-offset timezone (UTC-5 EST) — A-1 fix', () => {
+    // America/New_York is UTC-5 in winter (EST).
+    // Midnight Jan 1 2026 local = 2026-01-01T05:00:00Z.
+    const result = startOfDayInTz(2026, 0, 1, 'America/New_York');
+    expect(result.toISOString()).toBe('2026-01-01T05:00:00.000Z');
+  });
+
+  it('returns correct UTC instant for America/Los_Angeles (UTC-8 PST)', () => {
+    // Midnight Jan 1 2026 local = 2026-01-01T08:00:00Z
+    const result = startOfDayInTz(2026, 0, 1, 'America/Los_Angeles');
+    expect(result.toISOString()).toBe('2026-01-01T08:00:00.000Z');
+  });
+
+  it('round-trip: dateParts of startOfDayInTz result returns the input date', () => {
+    const year = 2026;
+    const month = 0; // January (0-indexed)
+    const day = 1;
+    const tz = 'America/New_York';
+    const result = startOfDayInTz(year, month, day, tz);
+    const parts = dateParts(result, tz);
+    expect(parts.year).toBe(year);
+    expect(parts.month).toBe(month);
+    expect(parts.day).toBe(day);
   });
 });
 
@@ -70,13 +108,18 @@ describe('midnightInTz', () => {
     expect(result.toISOString()).toBe('2025-12-31T18:30:00.000Z');
   });
 
-  it('handles negative-offset timezone (UTC-5 EST)', () => {
-    // The implementation uses a UTC candidate (2026-01-01T00:00:00Z) and reads back
-    // what time that instant is in NYC (19:00 on Dec 31), then subtracts that offset.
-    // For negative-offset zones the result is anchored to the UTC date, not the local date.
-    // Actual output: 2026-01-01T00:00:00Z - 19h = 2025-12-31T05:00:00Z
+  it('handles negative-offset timezone (UTC-5 EST) — A-1 fix', () => {
+    // America/New_York is UTC-5 in winter (EST).
+    // Midnight Jan 1 2026 local = 2026-01-01T05:00:00Z.
+    // The old broken implementation returned 2025-12-31T05:00:00.000Z.
     const result = midnightInTz(2026, 0, 1, 'America/New_York');
-    expect(result.toISOString()).toBe('2025-12-31T05:00:00.000Z');
+    expect(result.toISOString()).toBe('2026-01-01T05:00:00.000Z');
+  });
+
+  it('handles positive-offset timezone (UTC+11 Australia/Sydney)', () => {
+    // AEDT is UTC+11; midnight Jan 1 2026 Sydney = 2025-12-31T13:00:00Z
+    const result = midnightInTz(2026, 0, 1, 'Australia/Sydney');
+    expect(result.toISOString()).toBe('2025-12-31T13:00:00.000Z');
   });
 
   it('handles Q2 start (April 1)', () => {

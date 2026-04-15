@@ -61,6 +61,12 @@ export interface OrgMetricCardProps {
   contributingBoards: number
   /** Number of boards that had no data (e.g. sampleSize === 0) */
   noDataBoards?: number
+  /**
+   * Optional footnote text displayed beneath the card footer.
+   * Use to surface important caveats about the metric (e.g. cycle-time proxy
+   * vs DORA lead time definition).  See Proposal 0030 Fix D-2.
+   */
+  footnote?: string
 }
 
 function formatValue(value: number, unit: string): string {
@@ -78,6 +84,7 @@ export function OrgMetricCard({
   sparkline,
   contributingBoards,
   noDataBoards,
+  footnote,
 }: OrgMetricCardProps) {
   const footerText =
     noDataBoards !== undefined && noDataBoards > 0
@@ -110,6 +117,12 @@ export function OrgMetricCard({
         )}
         <span className="text-xs text-muted">{footerText}</span>
       </div>
+
+      {footnote && (
+        <p className="mt-2 text-xs text-muted leading-snug border-t border-border pt-2">
+          {footnote}
+        </p>
+      )}
     </div>
   )
 }

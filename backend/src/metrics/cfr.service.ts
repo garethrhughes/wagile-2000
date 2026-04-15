@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, In } from 'typeorm';
+import { Repository, Between } from 'typeorm';
 import {
   JiraIssue,
   JiraChangelog,
@@ -59,10 +59,7 @@ export class CfrService {
       'incident',
       'hotfix',
     ];
-    const failureLinkTypes = config?.failureLinkTypes ?? [
-      'caused by',
-      'is caused by',
-    ];
+    const failureLinkTypes = config?.failureLinkTypes ?? [];
 
     // Count total deployments (issues that reached done in the period)
     const allIssues = (await this.issueRepo.find({
@@ -80,7 +77,8 @@ export class CfrService {
       };
     }
 
-    // Primary path: issues with fixVersion whose releaseDate falls in range.
+    // C-4: Primary path — count distinct release DAYS, consistent with
+    // DeploymentFrequencyService.  Multiple versions on the same day = 1 deployment.
     const releasedVersions = await this.versionRepo.find({
       where: {
         projectKey: boardId,
@@ -88,29 +86,41 @@ export class CfrService {
         releaseDate: Between(startDate, endDate),
       },
     });
-    const versionNames = releasedVersions.map((v) => v.name);
 
+    const releaseDays = new Set(
+      releasedVersions
+        .filter((v) => v.releaseDate != null)
+        .map((v) => v.releaseDate!.toISOString().split('T')[0]),
+    );
+    const versionDeployments = releaseDays.size;
+
+    // Collect all deployed issue keys (for the failure-classification step).
+    // We still need the issue keys to determine which issues were released;
+    // the deployment COUNT uses release days, but the failure classification
+    // must operate on the actual issues (type, labels, links).
+    const versionNames = releasedVersions.map((v) => v.name);
     const versionIssueKeys =
       versionNames.length > 0
         ? new Set(
             (
               await this.issueRepo.find({
-                where: { boardId, fixVersion: In(versionNames) },
+                where: { boardId },
               })
             )
-              .filter((i) => isWorkItem(i.issueType))
+              .filter(
+                (i) => isWorkItem(i.issueType) && i.fixVersion != null && versionNames.includes(i.fixVersion),
+              )
               .map((i) => i.key),
           )
         : new Set<string>();
 
-    // Fallback path: issues with NO fixVersion that transitioned to a done
-    // status in the period.  Only issues not already counted by the version
-    // path are eligible so there is no double-counting.
+    // C-4: Fallback path — count distinct transition DAYS for issues with no fixVersion.
     const noVersionKeys = allIssues
       .filter((i) => !i.fixVersion && !versionIssueKeys.has(i.key))
       .map((i) => i.key);
 
     let transitionIssueKeys = new Set<string>();
+    let fallbackDeployments = 0;
     if (noVersionKeys.length > 0) {
       const doneTransitions = await this.changelogRepo
         .createQueryBuilder('cl')
@@ -124,11 +134,26 @@ export class CfrService {
         })
         .getRawMany<{ issueKey: string }>();
       transitionIssueKeys = new Set(doneTransitions.map((t) => t.issueKey));
+
+      // Count distinct days for the fallback path
+      const fallbackDayRows = await this.changelogRepo
+        .createQueryBuilder('cl')
+        .select(`DATE(cl."changedAt") AS "transitionDay"`)
+        .where('cl.issueKey IN (:...keys)', { keys: noVersionKeys })
+        .andWhere('cl.field = :field', { field: 'status' })
+        .andWhere('cl.toValue IN (:...statuses)', { statuses: doneStatuses })
+        .andWhere('cl.changedAt BETWEEN :start AND :end', {
+          start: startDate,
+          end: endDate,
+        })
+        .groupBy('"transitionDay"')
+        .getRawMany<{ transitionDay: string }>();
+      fallbackDeployments = fallbackDayRows.length;
     }
 
     // Combine both paths
     const deployedKeys = new Set([...versionIssueKeys, ...transitionIssueKeys]);
-    const totalDeployments = deployedKeys.size;
+    const totalDeployments = versionDeployments + fallbackDeployments;
 
     // Count failure issues among deployed (type/label OR-gate)
     const issueMap = new Map(allIssues.map((i) => [i.key, i]));

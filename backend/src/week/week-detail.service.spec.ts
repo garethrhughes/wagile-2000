@@ -489,4 +489,69 @@ describe('WeekDetailService', () => {
       expect(result.summary.totalIssues).toBe(1);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // B-3: incidentPriorities from BoardConfig
+  // -------------------------------------------------------------------------
+
+  describe('B-3: incidentPriorities from BoardConfig', () => {
+    function setupB3(incidentPriorities: string[], issuePriority: string | null) {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'PLAT',
+        boardType: 'kanban',
+        doneStatusNames: ['Done'],
+        incidentIssueTypes: ['Bug'],
+        incidentLabels: [],
+        incidentPriorities,
+        failureIssueTypes: ['Bug'],
+        failureLabels: [],
+        backlogStatusIds: [],
+      } as unknown as BoardConfig);
+
+      issueRepo.find.mockResolvedValue([
+        makeIssue({
+          key: 'PLAT-1',
+          issueType: 'Bug',
+          priority: issuePriority,
+          createdAt: new Date('2026-01-05T09:00:00Z'),
+        }),
+      ]);
+
+      changelogRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([
+          makeChangelog({
+            issueKey: 'PLAT-1',
+            field: 'status',
+            fromValue: 'To Do',
+            toValue: 'In Progress',
+            changedAt: new Date('2026-01-05T09:00:00Z'),
+          }),
+        ]),
+      });
+
+      roadmapConfigRepo.find.mockResolvedValue([]);
+      jpdIdeaRepo.find.mockResolvedValue([]);
+    }
+
+    it('Bug at Highest priority IS incident when incidentPriorities = [Highest]', async () => {
+      setupB3(['Highest'], 'Highest');
+      const result = await service.getDetail('PLAT', WEEK);
+      expect(result.issues[0].isIncident).toBe(true);
+    });
+
+    it('Bug at Medium priority is NOT incident when incidentPriorities = [Highest]', async () => {
+      setupB3(['Highest'], 'Medium');
+      const result = await service.getDetail('PLAT', WEEK);
+      expect(result.issues[0].isIncident).toBe(false);
+    });
+
+    it('Bug at any priority IS incident when incidentPriorities = [] (empty = all)', async () => {
+      setupB3([], 'Low');
+      const result = await service.getDetail('PLAT', WEEK);
+      expect(result.issues[0].isIncident).toBe(true);
+    });
+  });
 });

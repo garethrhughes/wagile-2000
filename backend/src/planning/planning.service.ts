@@ -527,6 +527,12 @@ export class PlanningService {
     const doneStatuses: string[] = config.doneStatusNames ?? ['Done', 'Closed', 'Released'];
     const backlogStatusIds: string[] = config.backlogStatusIds ?? [];
 
+    // C-3: configurable board-entry status list (fix for hardcoded 'To Do').
+    // An issue enters the board when it first transitions *to* one of these statuses.
+    const boardEntryStatuses: string[] = config.boardEntryStatuses ?? [
+      'To Do', 'Backlog', 'Open', 'New', 'TODO', 'OPEN', 'Selected for Development',
+    ];
+
     // Load all issues for this board, excluding Epics and Sub-tasks
     const allIssues = (
       await this.issueRepo.find({ where: { boardId } })
@@ -538,12 +544,13 @@ export class PlanningService {
 
     const issueKeys = allIssues.map((i) => i.key);
 
-    // Bulk-load the earliest "To Do -> *" status changelog per issue (board-entry date)
+    // Bulk-load the earliest board-entry changelog per issue.
+    // An issue "enters" the board on the first transition *to* a boardEntryStatus.
     const boardEntryChangelogs = await this.changelogRepo
       .createQueryBuilder('cl')
       .where('cl.issueKey IN (:...keys)', { keys: issueKeys })
       .andWhere('cl.field = :field', { field: 'status' })
-      .andWhere('cl.fromValue = :from', { from: 'To Do' })
+      .andWhere('cl.toValue IN (:...statuses)', { statuses: boardEntryStatuses })
       .orderBy('cl.changedAt', 'ASC')
       .getMany();
 
@@ -711,6 +718,11 @@ export class PlanningService {
     const doneStatuses: string[] = config.doneStatusNames ?? ['Done', 'Closed', 'Released'];
     const backlogStatusIds: string[] = config.backlogStatusIds ?? [];
 
+    // C-3: configurable board-entry status list (fix for hardcoded 'To Do').
+    const boardEntryStatuses: string[] = config.boardEntryStatuses ?? [
+      'To Do', 'Backlog', 'Open', 'New', 'TODO', 'OPEN', 'Selected for Development',
+    ];
+
     // Load all issues for this board, excluding Epics and Sub-tasks
     const allIssues = (
       await this.issueRepo.find({ where: { boardId } })
@@ -722,12 +734,12 @@ export class PlanningService {
 
     const issueKeys = allIssues.map((i) => i.key);
 
-    // Bulk-load the earliest "To Do -> *" status changelog per issue (board-entry date)
+    // Bulk-load the earliest board-entry changelog per issue.
     const boardEntryChangelogs = await this.changelogRepo
       .createQueryBuilder('cl')
       .where('cl.issueKey IN (:...keys)', { keys: issueKeys })
       .andWhere('cl.field = :field', { field: 'status' })
-      .andWhere('cl.fromValue = :from', { from: 'To Do' })
+      .andWhere('cl.toValue IN (:...statuses)', { statuses: boardEntryStatuses })
       .orderBy('cl.changedAt', 'ASC')
       .getMany();
 

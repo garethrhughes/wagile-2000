@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { WorkingTimeConfigEntity } from '../database/entities/index.js';
+import { startOfDayInTz } from './tz-utils.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -124,14 +125,6 @@ export class WorkingTimeService {
     const { timezone, workDays, holidays } = config;
     const holidaySet = new Set(holidays);
 
-    // Shared formatter for local date strings ("YYYY-MM-DD" via en-CA locale).
-    const dateFmt = new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
-
     // Shared formatter for weekday names — constructed once to avoid allocating
     // a new Intl.DateTimeFormat on every calendar-day iteration.
     const weekdayFmt = new Intl.DateTimeFormat('en-US', {
@@ -141,6 +134,14 @@ export class WorkingTimeService {
 
     let totalMs = 0;
 
+    // Shared formatter for local date strings ("YYYY-MM-DD" via en-CA locale).
+    const dateFmt = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+
     // Determine the local calendar date of `start` in the target timezone.
     let dayStr = dateFmt.format(start); // "YYYY-MM-DD"
 
@@ -148,7 +149,8 @@ export class WorkingTimeService {
       const [y, m, d] = dayStr.split('-').map(Number); // m is 1-indexed
 
       // UTC instant for the start of this local calendar day.
-      const dayStart = startOfDayInTz(y, m, d, timezone, dateFmt);
+      // m is 1-indexed (from en-CA split); startOfDayInTz uses 0-indexed months.
+      const dayStart = startOfDayInTz(y, m - 1, d, timezone);
 
       // If this day's start is at or beyond `end`, we are done.
       if (dayStart >= end) break;
@@ -156,12 +158,13 @@ export class WorkingTimeService {
       // Advance local date by 1 calendar day (JS Date handles month/year rollover).
       const nextDateUtc = new Date(Date.UTC(y, m - 1, d + 1));
       const ny = nextDateUtc.getUTCFullYear();
-      const nm = nextDateUtc.getUTCMonth() + 1; // keep 1-indexed
+      const nm = nextDateUtc.getUTCMonth() + 1; // keep 1-indexed for string formatting
       const nd = nextDateUtc.getUTCDate();
       const nextStr = `${String(ny).padStart(4, '0')}-${String(nm).padStart(2, '0')}-${String(nd).padStart(2, '0')}`;
 
       // UTC instant for the start of the NEXT local calendar day.
-      const nextDayStart = startOfDayInTz(ny, nm, nd, timezone, dateFmt);
+      // nm is 1-indexed; convert to 0-indexed for startOfDayInTz.
+      const nextDayStart = startOfDayInTz(ny, nm - 1, nd, timezone);
 
       // Effective interval within [start, end] for this calendar day.
       const intervalStart = dayStart < start ? start : dayStart;
@@ -206,87 +209,6 @@ export class WorkingTimeService {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Returns the UTC Date representing the start of the local calendar day
- * (year, month [1-indexed], day) in the given IANA timezone.
- *
- * Uses binary search over a ±14h window centred on noon UTC of that
- * calendar date. This correctly handles:
- *   - Positive-offset timezones (e.g. Australia/Sydney, UTC+11)
- *   - Negative-offset timezones (e.g. America/New_York, UTC-5)
- *   - DST transitions (clocks spring forward / fall back)
- *
- * The offset-arithmetic approach used by the previous midnightInTz() in
- * tz-utils.ts is broken for negative-offset zones: it computes the time of
- * day shown by the UTC-midnight candidate in the local zone, then subtracts
- * that offset — anchoring to the UTC date rather than the local date.
- * For New_York (UTC-5), Jan 1 00:00 UTC displays as Dec 31 19:00 in NY,
- * so offsetMs=19h and the result is Dec 31 05:00 UTC, not Jan 1 05:00 UTC.
- *
- * Binary search avoids all such offset arithmetic by directly testing
- * "does this UTC instant fall on the target local date?" and narrowing
- * until it finds the earliest UTC instant that does.
- *
- * @param year   Full year (e.g. 2026)
- * @param month  1-indexed month (1 = January)
- * @param day    Day of month (1–31)
- * @param tz     IANA timezone string
- * @param fmt    Pre-constructed Intl.DateTimeFormat for the timezone (optional —
- *               pass to avoid repeated construction in tight loops)
- */
-function startOfDayInTz(
-  year: number,
-  month: number,
-  day: number,
-  tz: string,
-  fmt?: Intl.DateTimeFormat,
-): Date {
-  // Anchor to UTC midnight of the target CALENDAR date (not local noon).
-  //
-  // Why UTC midnight, not noon?
-  //   Using noon UTC as the anchor (the natural intuition) fails for large
-  //   positive offsets.  For UTC+10 (Sydney AEST), noon UTC is already 22:00
-  //   local — the same local date — so "lo = noon - 14h = 22:00Z - 14h =
-  //   08:00Z" is still within the same local day.  The binary search never
-  //   brackets the true midnight and returns a wrong result.
-  //
-  // By anchoring to UTC midnight (00:00Z) of the target calendar date:
-  //   lo = 00:00Z - 14h  — guaranteed before local midnight for UTC+14
-  //   hi = 00:00Z + 13h  — guaranteed after local midnight for UTC-12
-  //
-  // This correctly handles every IANA offset including extremes (UTC+14,
-  // UTC-12) and DST transitions.
-  const anchorUtcMs = Date.UTC(year, month - 1, day, 0, 0, 0);
-
-  const formatter =
-    fmt ??
-    new Intl.DateTimeFormat('en-CA', {
-      timeZone: tz,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
-
-  const targetStr = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-
-  // Binary search bounds: anchored to UTC midnight with ±14h/+13h window.
-  let lo = anchorUtcMs - 14 * 3_600_000; // guaranteed before midnight local
-  let hi = anchorUtcMs + 13 * 3_600_000; // guaranteed after midnight local
-
-  // Narrow to the first UTC millisecond whose local date equals targetStr.
-  while (hi - lo > 1) {
-    const mid = Math.floor((lo + hi) / 2);
-    const localDate = formatter.format(new Date(mid));
-    if (localDate >= targetStr) {
-      hi = mid;
-    } else {
-      lo = mid;
-    }
-  }
-
-  return new Date(hi);
-}
 
 /**
  * Returns the ISO weekday (0 = Sunday, 1 = Monday, …, 6 = Saturday) for a

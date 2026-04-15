@@ -53,11 +53,12 @@ describe('quarterToDates', () => {
   });
 
   it('handles negative UTC offset timezone correctly for Q1', () => {
-    // America/New_York (UTC-5 in winter): the implementation subtracts the local
-    // time shown by the UTC candidate (19:00 on Dec 31) from midnight UTC.
-    // Actual output: 2026-01-01T00:00:00Z - 19h = 2025-12-31T05:00:00Z
+    // America/New_York (UTC-5 in winter / EST): midnight on Jan 1 2026 in New York
+    // is 05:00 UTC (UTC-5), not 2025-12-31T05:00:00Z.
+    // The old broken midnightInTz algorithm returned 2025-12-31T05:00:00Z due to
+    // a sign error.  Fix A-1 (Proposal 0030) corrects this.
     const { startDate } = quarterToDates('2026-Q1', 'America/New_York');
-    expect(startDate.toISOString()).toBe('2025-12-31T05:00:00.000Z');
+    expect(startDate.toISOString()).toBe('2026-01-01T05:00:00.000Z');
   });
 });
 

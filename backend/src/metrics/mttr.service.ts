@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -15,10 +15,23 @@ export interface MttrResult {
   medianHours: number;
   band: DoraBand;
   incidentCount: number;
+  /** Incidents opened in the period with no recovery transition yet. */
+  openIncidentCount: number;
+  /** Incidents with recovery timestamp before detection timestamp (data anomalies). */
+  anomalyCount: number;
+}
+
+/** Internal return type of getMttrObservations — includes counters alongside sample. */
+interface MttrObservations {
+  recoveryHours: number[];
+  openIncidentCount: number;
+  anomalyCount: number;
 }
 
 @Injectable()
 export class MttrService {
+  private readonly logger = new Logger(MttrService.name);
+
   constructor(
     @InjectRepository(JiraIssue)
     private readonly issueRepo: Repository<JiraIssue>,
@@ -29,14 +42,15 @@ export class MttrService {
   ) {}
 
   /**
-   * Returns the raw sorted recovery-hours observations for a board/period.
+   * Returns the raw sorted recovery-hours observations for a board/period,
+   * plus counts of open incidents and data anomalies.
    * Used by MetricsService.getDoraAggregate() for pooled-median computation.
    */
   async getMttrObservations(
     boardId: string,
     startDate: Date,
     endDate: Date,
-  ): Promise<number[]> {
+  ): Promise<MttrObservations> {
     const config = await this.boardConfigRepo.findOne({
       where: { boardId },
     });
@@ -99,7 +113,7 @@ export class MttrService {
           )
         : incidentIssues;
 
-    if (priorityFilteredIssues.length === 0) return [];
+    if (priorityFilteredIssues.length === 0) return { recoveryHours: [], openIncidentCount: 0, anomalyCount: 0 };
 
     const incidentKeys = priorityFilteredIssues.map((i) => i.key);
 
@@ -146,12 +160,11 @@ export class MttrService {
     // WorkingTimeService is therefore intentionally NOT used here.
     const issueMap = new Map(priorityFilteredIssues.map((i) => [i.key, i]));
     const recoveryHours: number[] = [];
+    let openIncidentCount = 0;
+    let anomalyCount = 0;
 
-    for (const [issueKey, recoveryDate] of firstRecoveryByIssue) {
-      const issue = issueMap.get(issueKey);
-      if (!issue) continue;
-
-      const issueLogs = changelogsByIssue.get(issueKey) ?? [];
+    for (const issue of priorityFilteredIssues) {
+      const issueLogs = changelogsByIssue.get(issue.key) ?? [];
       const inProgressTransition = issueLogs.find(
         (cl) => cl.toValue !== null && inProgressNames.includes(cl.toValue),
       );
@@ -159,15 +172,35 @@ export class MttrService {
         ? inProgressTransition.changedAt
         : issue.createdAt;
 
+      const recoveryDate = firstRecoveryByIssue.get(issue.key);
+      if (!recoveryDate) {
+        // Incident has no recovery transition — it is still open.
+        openIncidentCount++;
+        continue;
+      }
+
       const hours =
         (recoveryDate.getTime() - startTime.getTime()) / (1000 * 60 * 60);
-      if (hours >= 0) {
-        recoveryHours.push(hours);
+      if (hours < 0) {
+        // Data anomaly: recovery timestamp precedes detection timestamp.
+        // Log a warning so operators can investigate the underlying Jira data.
+        this.logger.warn(
+          `MTTR anomaly: issue ${issue.key} has recovery before detection ` +
+          `(${recoveryDate.toISOString()} < ${startTime.toISOString()}).` +
+          ` Excluding from MTTR sample.`,
+        );
+        anomalyCount++;
+        continue;
       }
+
+      recoveryHours.push(hours);
     }
 
+    // Suppress unused variable warning for issueMap (kept for potential future use)
+    void issueMap;
+
     recoveryHours.sort((a, b) => a - b);
-    return recoveryHours;
+    return { recoveryHours, openIncidentCount, anomalyCount };
   }
 
   async calculate(
@@ -175,11 +208,8 @@ export class MttrService {
     startDate: Date,
     endDate: Date,
   ): Promise<MttrResult> {
-    const recoveryHours = await this.getMttrObservations(
-      boardId,
-      startDate,
-      endDate,
-    );
+    const { recoveryHours, openIncidentCount, anomalyCount } =
+      await this.getMttrObservations(boardId, startDate, endDate);
 
     if (recoveryHours.length === 0) {
       return {
@@ -187,6 +217,8 @@ export class MttrService {
         medianHours: 0,
         band: classifyMTTR(0),
         incidentCount: 0,
+        openIncidentCount,
+        anomalyCount,
       };
     }
 
@@ -198,6 +230,8 @@ export class MttrService {
       medianHours: round2(median),
       band: classifyMTTR(median),
       incidentCount: recoveryHours.length,
+      openIncidentCount,
+      anomalyCount,
     };
   }
 }

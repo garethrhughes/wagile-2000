@@ -54,6 +54,18 @@ function abbreviateQuarter(label: string): string {
   return label.length > 8 ? label.slice(0, 8) : label
 }
 
+/**
+ * Returns the current calendar quarter label in YYYY-QN format (e.g. "2026-Q2").
+ * Used to align the headline aggregate with the rightmost trend chart point so
+ * that both values are always computed over the same time window.
+ * (Proposal 0031 — fix for MTTR headline / chart discrepancy.)
+ */
+function currentQuarterLabel(): string {
+  const now = new Date()
+  const q = Math.floor(now.getMonth() / 3) + 1
+  return `${now.getFullYear()}-Q${q}`
+}
+
 // ---------------------------------------------------------------------------
 // TrendChart component
 // ---------------------------------------------------------------------------
@@ -207,8 +219,13 @@ function DoraPageInner() {
     const boardId = selectedBoards.join(',')
 
     const load = async (): Promise<void> => {
+      // Always scope the headline aggregate to the current calendar quarter so
+      // it matches the rightmost point on the trend chart.  Without an explicit
+      // quarter the backend defaults to a rolling 90-day window, which can
+      // include incidents from a previous quarter and produce a headline that
+      // disagrees with every visible chart bar.  (Proposal 0031.)
       const [aggregate, trend] = await Promise.all([
-        getDoraAggregate({ boardId }),
+        getDoraAggregate({ boardId, quarter: currentQuarterLabel() }),
         getDoraTrend({
           boardId,
           mode: periodType === 'sprint' ? 'sprints' : 'quarters',
@@ -447,6 +464,7 @@ function DoraPageInner() {
                 selectedBoards.length -
                 pageState.aggregate.orgLeadTime.contributingBoards
               }
+              footnote="Measures cycle time (first active-work status → done), not the DORA definition of lead time (commit → deploy). A proxy metric for teams without commit-level Jira integration."
             />
             <OrgMetricCard
               title="Change Failure Rate"

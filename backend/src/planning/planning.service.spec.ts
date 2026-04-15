@@ -570,4 +570,126 @@ describe('PlanningService', () => {
       expect(result[0].completed).toBe(1);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // C-3: boardEntryStatuses — configurable board-entry status list
+  // -------------------------------------------------------------------------
+
+  describe('C-3: boardEntryStatuses', () => {
+    it('queries board-entry using toValue IN boardEntryStatuses (not fromValue = To Do)', async () => {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'PLAT',
+        boardType: 'kanban',
+        doneStatusNames: ['Done'],
+        backlogStatusIds: [],
+        dataStartDate: null,
+        boardEntryStatuses: ['Backlog', 'To Do', 'Open'],
+      } as unknown as BoardConfig);
+
+      issueRepo.find.mockResolvedValue([
+        {
+          key: 'PLAT-1', boardId: 'PLAT', issueType: 'Story', summary: 'S',
+          status: 'Done', labels: [], epicKey: null, fixVersion: null,
+          sprintId: null, createdAt: new Date('2025-12-01T00:00:00Z'),
+          priority: null, points: null, statusId: null,
+        } as unknown as JiraIssue,
+      ]);
+
+      const firstQb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([
+          {
+            issueKey: 'PLAT-1', field: 'status', fromValue: null,
+            toValue: 'Backlog',
+            changedAt: new Date('2026-01-05T09:00:00Z'),
+          },
+        ]),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      };
+
+      let qbCallCount = 0;
+      changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+        qbCallCount++;
+        if (qbCallCount === 1) return firstQb;
+        const qb = {
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          select: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([]),
+          getRawMany: jest.fn().mockResolvedValue([{ issueKey: 'PLAT-1' }]),
+        };
+        return qb;
+      });
+
+      await service.getKanbanQuarters('PLAT');
+
+      // After fix: first board-entry query uses toValue IN (...) not fromValue = 'To Do'
+      const andWhereCalls = firstQb.andWhere.mock.calls.map((c) => c[0]);
+      expect(andWhereCalls).not.toContain('cl.fromValue = :from');
+      expect(andWhereCalls.some((c: string) => c.includes('toValue IN'))).toBe(true);
+    });
+
+    it('includes extended default statuses (Backlog, Open, New) when not configured', async () => {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'PLAT',
+        boardType: 'kanban',
+        doneStatusNames: ['Done'],
+        backlogStatusIds: [],
+        dataStartDate: null,
+        // boardEntryStatuses: not set
+      } as unknown as BoardConfig);
+
+      issueRepo.find.mockResolvedValue([
+        {
+          key: 'PLAT-2', boardId: 'PLAT', issueType: 'Story', summary: 'T',
+          status: 'Done', labels: [], epicKey: null, fixVersion: null,
+          sprintId: null, createdAt: new Date('2025-11-01T00:00:00Z'),
+          priority: null, points: null, statusId: null,
+        } as unknown as JiraIssue,
+      ]);
+
+      const firstQb = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      };
+
+      let qbCallCount = 0;
+      changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+        qbCallCount++;
+        if (qbCallCount === 1) return firstQb;
+        const qb = {
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          select: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          getMany: jest.fn().mockResolvedValue([]),
+          getRawMany: jest.fn().mockResolvedValue([]),
+        };
+        return qb;
+      });
+
+      await service.getKanbanQuarters('PLAT');
+
+      // The second andWhere call for the board-entry query should pass the default list
+      // containing at minimum 'To Do', 'Backlog', 'Open', 'New'
+      const andWhereCalls = firstQb.andWhere.mock.calls;
+      const statusesCall = andWhereCalls.find((c) =>
+        typeof c[0] === 'string' && c[0].includes('toValue IN'),
+      );
+      expect(statusesCall).toBeDefined();
+      const statusesArg = statusesCall![1] as { statuses: string[] };
+      expect(statusesArg.statuses).toContain('To Do');
+      expect(statusesArg.statuses).toContain('Backlog');
+      expect(statusesArg.statuses).toContain('Open');
+      expect(statusesArg.statuses).toContain('New');
+    });
+  });
 });

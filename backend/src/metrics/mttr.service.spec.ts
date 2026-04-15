@@ -174,4 +174,150 @@ describe('MttrService', () => {
     expect(result.medianHours).toBe(0.5);
     expect(result.band).toBe('elite');
   });
+
+  // -------------------------------------------------------------------------
+  // Fix C-2: openIncidentCount and anomalyCount
+  // -------------------------------------------------------------------------
+  describe('C-2: openIncidentCount and anomalyCount', () => {
+    it('counts incident with no recovery transition as openIncidentCount', async () => {
+      const start = new Date('2025-01-01');
+      const end = new Date('2025-03-31');
+
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'ACC',
+        boardType: 'scrum',
+        incidentIssueTypes: ['Incident'],
+        recoveryStatusNames: ['Done'],
+        incidentLabels: [],
+        incidentPriorities: [],
+        inProgressStatusNames: ['In Progress'],
+        dataStartDate: null,
+      } as unknown as BoardConfig);
+
+      issueRepo.find.mockResolvedValue([
+        {
+          key: 'ACC-1',
+          boardId: 'ACC',
+          issueType: 'Incident',
+          labels: [],
+          priority: null,
+          createdAt: new Date('2025-02-01T00:00:00Z'),
+        },
+      ] as unknown as JiraIssue[]);
+
+      // No recovery transition for ACC-1
+      changelogRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      });
+
+      const result = await service.calculate('ACC', start, end);
+
+      expect(result.openIncidentCount).toBe(1);
+      expect(result.incidentCount).toBe(0); // excluded from MTTR sample
+      expect(result.medianHours).toBe(0);
+    });
+
+    it('logs warning and increments anomalyCount for negative recovery time', async () => {
+      const start = new Date('2025-01-01');
+      const end = new Date('2025-03-31');
+
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'ACC',
+        boardType: 'scrum',
+        incidentIssueTypes: ['Incident'],
+        recoveryStatusNames: ['Done'],
+        incidentLabels: [],
+        incidentPriorities: [],
+        inProgressStatusNames: ['In Progress'],
+        dataStartDate: null,
+      } as unknown as BoardConfig);
+
+      issueRepo.find.mockResolvedValue([
+        {
+          key: 'ACC-1',
+          boardId: 'ACC',
+          issueType: 'Incident',
+          labels: [],
+          priority: null,
+          createdAt: new Date('2025-02-10T00:00:00Z'),
+        },
+      ] as unknown as JiraIssue[]);
+
+      // In Progress AFTER the Done transition (anomaly: recovery before detection)
+      changelogRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([
+          {
+            issueKey: 'ACC-1',
+            field: 'status',
+            toValue: 'In Progress',
+            changedAt: new Date('2025-02-10T12:00:00Z'), // start time
+          },
+          {
+            issueKey: 'ACC-1',
+            field: 'status',
+            toValue: 'Done',
+            changedAt: new Date('2025-02-10T06:00:00Z'), // BEFORE In Progress → negative
+          },
+        ]),
+      });
+
+      const result = await service.calculate('ACC', start, end);
+
+      expect(result.anomalyCount).toBe(1);
+      expect(result.incidentCount).toBe(0); // excluded from sample
+    });
+
+    it('returns openIncidentCount = 0 and anomalyCount = 0 for normal incidents', async () => {
+      const start = new Date('2025-01-01');
+      const end = new Date('2025-03-31');
+
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'ACC',
+        boardType: 'scrum',
+        incidentIssueTypes: ['Incident'],
+        recoveryStatusNames: ['Done'],
+        incidentLabels: [],
+        incidentPriorities: [],
+        inProgressStatusNames: ['In Progress'],
+        dataStartDate: null,
+      } as unknown as BoardConfig);
+
+      issueRepo.find.mockResolvedValue([
+        {
+          key: 'ACC-1',
+          boardId: 'ACC',
+          issueType: 'Incident',
+          labels: [],
+          priority: null,
+          createdAt: new Date('2025-02-01T00:00:00Z'),
+        },
+      ] as unknown as JiraIssue[]);
+
+      changelogRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([
+          {
+            issueKey: 'ACC-1',
+            field: 'status',
+            toValue: 'Done',
+            changedAt: new Date('2025-02-01T06:00:00Z'), // 6 hours after createdAt
+          },
+        ]),
+      });
+
+      const result = await service.calculate('ACC', start, end);
+
+      expect(result.openIncidentCount).toBe(0);
+      expect(result.anomalyCount).toBe(0);
+      expect(result.incidentCount).toBe(1);
+    });
+  });
 });

@@ -186,7 +186,7 @@ export class MetricsService {
         // Fetch observations (raw arrays) and totals (df, cfr) in parallel.
         // Lead time and MTTR summaries are derived from observations to avoid
         // duplicate DB queries (RC-1).
-        const [df, cfr, ltResult, mttrObs, boardConfig] = await Promise.all([
+        const [df, cfr, ltResult, mttrObsResult, boardConfig] = await Promise.all([
           this.deploymentFrequencyService.calculate(boardId, startDate, endDate),
           this.cfrService.calculate(boardId, startDate, endDate),
           this.leadTimeService.getLeadTimeObservations(boardId, startDate, endDate),
@@ -196,6 +196,10 @@ export class MetricsService {
 
         const ltObs = ltResult.observations;
         const ltAnomalyCount = ltResult.anomalyCount;
+
+        const mttrObs = mttrObsResult.recoveryHours;
+        const mttrOpenCount = mttrObsResult.openIncidentCount;
+        const mttrAnomalyCount = mttrObsResult.anomalyCount;
 
         // Derive per-board summaries from the already-fetched observations.
         // Arrays are pre-sorted by the observation methods.
@@ -216,6 +220,8 @@ export class MetricsService {
           medianHours: round2(mttrMedianVal),
           band: classifyMTTR(mttrMedianVal),
           incidentCount: mttrObs.length,
+          openIncidentCount: mttrOpenCount,
+          anomalyCount: mttrAnomalyCount,
         };
 
         return { boardId, df, cfr, lt, mttr, ltObs, mttrObs, boardConfig };

@@ -226,11 +226,12 @@ export class SprintDetailService {
       'Closed',
       'Released',
     ];
-    const failureIssueTypes: string[] = boardConfig?.failureIssueTypes ?? [];
-    const failureLabels: string[] = boardConfig?.failureLabels ?? [];
-    const incidentIssueTypes: string[] = boardConfig?.incidentIssueTypes ?? [];
+    const failureIssueTypes: string[] = boardConfig?.failureIssueTypes ?? ['Bug', 'Incident'];
+    const failureLabels: string[] = boardConfig?.failureLabels ?? ['regression', 'incident', 'hotfix'];
+    const incidentIssueTypes: string[] = boardConfig?.incidentIssueTypes ?? ['Bug', 'Incident'];
     const incidentLabels: string[] = boardConfig?.incidentLabels ?? [];
     const cancelledStatusNames: string[] = boardConfig?.cancelledStatusNames ?? ['Cancelled', "Won't Do"];
+    const incidentPriorities: string[] = boardConfig?.incidentPriorities ?? ['Critical', 'Highest', 'P1', 'P2'];
 
     const boardConfigShape: SprintDetailBoardConfig = {
       doneStatusNames,
@@ -445,11 +446,16 @@ export class SprintDetailService {
       // addedMidSprint
       const addedMidSprint = addedKeys.has(issueKey);
 
-      // isIncident
-      const isIncident =
+      // isIncident: must match type/label AND pass priority AND-gate
+      // (consistent with MttrService; incidentPriorities = [] means all priorities qualify)
+      const matchesIncidentTypeOrLabel =
         incidentIssueTypes.includes(issue.issueType) ||
         (incidentLabels.length > 0 &&
           issue.labels.some((l) => incidentLabels.includes(l)));
+      const isIncident =
+        matchesIncidentTypeOrLabel &&
+        (incidentPriorities.length === 0 ||
+          incidentPriorities.includes(issue.priority ?? ''));
 
       // isFailure
       const isFailure =

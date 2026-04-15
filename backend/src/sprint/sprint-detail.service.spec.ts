@@ -378,6 +378,7 @@ describe('SprintDetailService', () => {
       failureLabels: [],
       incidentIssueTypes: ['Bug'],
       incidentLabels: [],
+      incidentPriorities: [], // empty = all priorities qualify
       cancelledStatusNames: ['Cancelled'],
     } as unknown as BoardConfig);
 
@@ -1596,5 +1597,244 @@ describe('SprintDetailService', () => {
     );
     // The returned value from workingDaysBetween is reflected in leadTimeDays
     expect(result.issues[0].leadTimeDays).toBe(1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // B-4: Missing BoardConfig fallback defaults
+  // ---------------------------------------------------------------------------
+
+  describe('B-4: missing BoardConfig fallback defaults', () => {
+    it('classifies Bug issues as failures when boardConfig is null', async () => {
+      sprintRepo.findOne.mockResolvedValue(SPRINT);
+      boardConfigRepo.findOne.mockResolvedValue(null); // No BoardConfig row
+
+      issueRepo.find.mockResolvedValue([
+        {
+          key: 'ACC-1',
+          boardId: 'ACC',
+          issueType: 'Bug',
+          summary: 'A bug',
+          status: 'Done',
+          sprintId: 'sprint-1',
+          epicKey: null,
+          labels: [],
+          points: null,
+          priority: null,
+          createdAt: new Date('2026-01-03T00:00:00Z'),
+        } as unknown as JiraIssue,
+      ]);
+      roadmapConfigRepo.find.mockResolvedValue([]);
+
+      let qbCallCount = 0;
+      changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+        qbCallCount++;
+        if (qbCallCount === 1) {
+          return makeQb([
+            {
+              issueKey: 'ACC-1',
+              field: 'Sprint',
+              toValue: 'Sprint 1',
+              fromValue: null,
+              changedAt: new Date('2026-01-04T00:00:00Z'),
+            },
+          ]);
+        }
+        return makeQb([
+          {
+            issueKey: 'ACC-1',
+            field: 'status',
+            toValue: 'Done',
+            changedAt: new Date('2026-01-10T10:00:00Z'),
+          },
+        ]);
+      });
+
+      const result = await service.getDetail('ACC', 'sprint-1');
+
+      // With B-4 fix: Bug should be classified as a failure even without BoardConfig
+      expect(result.issues[0].isFailure).toBe(true);
+      expect(result.summary.failureCount).toBe(1);
+    });
+
+    it('classifies Incident issues as failures when boardConfig is null', async () => {
+      sprintRepo.findOne.mockResolvedValue(SPRINT);
+      boardConfigRepo.findOne.mockResolvedValue(null);
+
+      issueRepo.find.mockResolvedValue([
+        {
+          key: 'ACC-2',
+          boardId: 'ACC',
+          issueType: 'Incident',
+          summary: 'An incident',
+          status: 'In Progress',
+          sprintId: 'sprint-1',
+          epicKey: null,
+          labels: [],
+          points: null,
+          priority: null,
+          createdAt: new Date('2026-01-03T00:00:00Z'),
+        } as unknown as JiraIssue,
+      ]);
+      roadmapConfigRepo.find.mockResolvedValue([]);
+
+      let qbCallCount = 0;
+      changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+        qbCallCount++;
+        if (qbCallCount === 1) {
+          return makeQb([
+            {
+              issueKey: 'ACC-2',
+              field: 'Sprint',
+              toValue: 'Sprint 1',
+              fromValue: null,
+              changedAt: new Date('2026-01-04T00:00:00Z'),
+            },
+          ]);
+        }
+        return makeQb([]);
+      });
+
+      const result = await service.getDetail('ACC', 'sprint-1');
+
+      // Incident should be classified as failure by default
+      expect(result.issues[0].isFailure).toBe(true);
+    });
+
+    it('classifies Story issues as non-failures when boardConfig is null', async () => {
+      sprintRepo.findOne.mockResolvedValue(SPRINT);
+      boardConfigRepo.findOne.mockResolvedValue(null);
+
+      issueRepo.find.mockResolvedValue([
+        {
+          key: 'ACC-3',
+          boardId: 'ACC',
+          issueType: 'Story',
+          summary: 'A story',
+          status: 'Done',
+          sprintId: 'sprint-1',
+          epicKey: null,
+          labels: [],
+          points: null,
+          priority: null,
+          createdAt: new Date('2026-01-03T00:00:00Z'),
+        } as unknown as JiraIssue,
+      ]);
+      roadmapConfigRepo.find.mockResolvedValue([]);
+
+      let qbCallCount = 0;
+      changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+        qbCallCount++;
+        if (qbCallCount === 1) {
+          return makeQb([
+            {
+              issueKey: 'ACC-3',
+              field: 'Sprint',
+              toValue: 'Sprint 1',
+              fromValue: null,
+              changedAt: new Date('2026-01-04T00:00:00Z'),
+            },
+          ]);
+        }
+        return makeQb([
+          {
+            issueKey: 'ACC-3',
+            field: 'status',
+            toValue: 'Done',
+            changedAt: new Date('2026-01-10T10:00:00Z'),
+          },
+        ]);
+      });
+
+      const result = await service.getDetail('ACC', 'sprint-1');
+
+      // Story should NOT be classified as failure
+      expect(result.issues[0].isFailure).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // B-2: incidentPriorities AND-gate in sprint view
+  // ---------------------------------------------------------------------------
+
+  describe('B-2: incidentPriorities AND-gate', () => {
+    function makeB2Setup(priority: string | null, incidentPriorities: string[]) {
+      sprintRepo.findOne.mockResolvedValue(SPRINT);
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'ACC',
+        boardType: 'scrum',
+        doneStatusNames: ['Done'],
+        failureIssueTypes: ['Bug', 'Incident'],
+        failureLabels: [],
+        incidentIssueTypes: ['Bug', 'Incident'],
+        incidentLabels: [],
+        incidentPriorities,
+        cancelledStatusNames: [],
+      } as unknown as BoardConfig);
+
+      issueRepo.find.mockResolvedValue([
+        {
+          key: 'ACC-1',
+          boardId: 'ACC',
+          issueType: 'Bug',
+          summary: 'A bug',
+          status: 'Done',
+          sprintId: 'sprint-1',
+          epicKey: null,
+          labels: [],
+          points: null,
+          priority,
+          createdAt: new Date('2026-01-03T00:00:00Z'),
+        } as unknown as JiraIssue,
+      ]);
+      roadmapConfigRepo.find.mockResolvedValue([]);
+
+      let qbCallCount = 0;
+      changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+        qbCallCount++;
+        if (qbCallCount === 1) {
+          return makeQb([
+            {
+              issueKey: 'ACC-1',
+              field: 'Sprint',
+              toValue: 'Sprint 1',
+              fromValue: null,
+              changedAt: new Date('2026-01-04T00:00:00Z'),
+            },
+          ]);
+        }
+        return makeQb([
+          {
+            issueKey: 'ACC-1',
+            field: 'status',
+            toValue: 'Done',
+            changedAt: new Date('2026-01-10T10:00:00Z'),
+          },
+        ]);
+      });
+    }
+
+    it('Bug at Medium priority is NOT classified as incident when incidentPriorities = [Critical, Highest]', async () => {
+      makeB2Setup('Medium', ['Critical', 'Highest']);
+
+      const result = await service.getDetail('ACC', 'sprint-1');
+
+      expect(result.issues[0].isIncident).toBe(false);
+    });
+
+    it('Bug at Critical priority IS classified as incident when incidentPriorities = [Critical, Highest]', async () => {
+      makeB2Setup('Critical', ['Critical', 'Highest']);
+
+      const result = await service.getDetail('ACC', 'sprint-1');
+
+      expect(result.issues[0].isIncident).toBe(true);
+    });
+
+    it('any-priority Bug IS classified as incident when incidentPriorities = [] (empty means all qualify)', async () => {
+      makeB2Setup('Low', []);
+
+      const result = await service.getDetail('ACC', 'sprint-1');
+
+      expect(result.issues[0].isIncident).toBe(true);
+    });
   });
 });

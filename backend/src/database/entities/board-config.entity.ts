@@ -68,4 +68,18 @@ export class BoardConfig {
    */
   @Column({ type: 'simple-json', default: '["Cancelled","Won\'t Do"]' })
   cancelledStatusNames!: string[];
+
+  /**
+   * Status names that represent the initial board-entry state for Kanban boards.
+   * An issue is considered to have "entered the board" when it first transitions
+   * *to* one of these statuses.  Used by getKanbanQuarters and getKanbanWeeks
+   * to determine board-entry date instead of falling back to createdAt.
+   *
+   * When null / not set, the extended default list is used:
+   * ['To Do', 'Backlog', 'Open', 'New', 'TODO', 'OPEN', 'Selected for Development']
+   *
+   * See Proposal 0030 Fix C-3.
+   */
+  @Column({ type: 'simple-json', nullable: true, default: null })
+  boardEntryStatuses!: string[] | null;
 }

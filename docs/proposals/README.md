@@ -31,3 +31,5 @@
 | [0027](0027-aws-terraform-infrastructure.md) | AWS Terraform Infrastructure | Draft | 2026-04-14 |
 | [0028](0028-jira-field-id-externalisation.md) | Jira Field ID and Instance-Specific Value Externalisation | Accepted | 2026-04-15 |
 | [0029](0029-working-time-service.md) | Working-Time Service: Exclude Weekends from Flow Metrics | Accepted | 2026-04-15 |
+| [0030](0030-metrics-correctness-second-audit-fixes.md) | Metrics Correctness: Second Audit Fix Batch | Draft | 2026-04-15 |
+| [0031](0031-mttr-headline-chart-discrepancy.md) | MTTR Headline / Chart Discrepancy: Root Cause & Fix | Accepted | 2026-04-15 |

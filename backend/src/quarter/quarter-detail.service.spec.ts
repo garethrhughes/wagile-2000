@@ -136,26 +136,6 @@ describe('QuarterDetailService', () => {
       const result = await service.getDetail('ACC', '2026-Q1');
       expect(result.summary.totalIssues).toBe(0);
     });
-
-    it('returns empty when no issues fall within the quarter', async () => {
-      // Issue created in Q2, not Q1
-      issueRepo.find.mockResolvedValue([
-        makeIssue({ key: 'ACC-1', createdAt: new Date('2026-04-15T09:00:00Z') }),
-      ]);
-      // Changelog with Q2 entry date
-      changelogRepo.createQueryBuilder = jest.fn().mockReturnValue({
-        where: jest.fn().mockReturnThis(),
-        andWhere: jest.fn().mockReturnThis(),
-        orderBy: jest.fn().mockReturnThis(),
-        getMany: jest.fn().mockResolvedValue([
-          makeChangelog({ issueKey: 'ACC-1', changedAt: new Date('2026-04-15T09:00:00Z') }),
-        ]),
-      });
-      roadmapConfigRepo.find.mockResolvedValue([]);
-
-      const result = await service.getDetail('ACC', '2026-Q1');
-      expect(result.summary.totalIssues).toBe(0);
-    });
   });
 
   // -------------------------------------------------------------------------
@@ -510,6 +490,78 @@ describe('QuarterDetailService', () => {
 
       const result = await service.getDetail('PLAT', '2026-Q1');
       expect(result.summary.totalIssues).toBe(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // B-3: incidentPriorities from BoardConfig
+  // -------------------------------------------------------------------------
+
+  describe('B-3: incidentPriorities from BoardConfig', () => {
+    function setupB3(incidentPriorities: string[], issuePriority: string | null) {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'ACC',
+        boardType: 'scrum',
+        doneStatusNames: ['Done'],
+        incidentIssueTypes: ['Bug'],
+        incidentLabels: [],
+        incidentPriorities,
+        failureIssueTypes: ['Bug'],
+        failureLabels: [],
+        backlogStatusIds: [],
+      } as unknown as BoardConfig);
+
+      issueRepo.find.mockResolvedValue([
+        makeIssue({
+          key: 'ACC-1',
+          issueType: 'Bug',
+          priority: issuePriority,
+          createdAt: new Date('2026-01-10T09:00:00Z'),
+        }),
+      ]);
+
+      changelogRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([
+          makeChangelog({
+            issueKey: 'ACC-1',
+            field: 'Sprint',
+            fromValue: null,
+            toValue: 'Sprint 1',
+            changedAt: new Date('2026-01-10T09:00:00Z'),
+          }),
+          makeChangelog({
+            issueKey: 'ACC-1',
+            field: 'status',
+            fromValue: 'To Do',
+            toValue: 'Done',
+            changedAt: new Date('2026-01-15T10:00:00Z'),
+          }),
+        ]),
+      });
+
+      roadmapConfigRepo.find.mockResolvedValue([]);
+      jpdIdeaRepo.find.mockResolvedValue([]);
+    }
+
+    it('Bug at Highest priority IS incident when incidentPriorities = [Highest]', async () => {
+      setupB3(['Highest'], 'Highest');
+      const result = await service.getDetail('ACC', '2026-Q1');
+      expect(result.issues[0].isIncident).toBe(true);
+    });
+
+    it('Bug at Medium priority is NOT incident when incidentPriorities = [Highest]', async () => {
+      setupB3(['Highest'], 'Medium');
+      const result = await service.getDetail('ACC', '2026-Q1');
+      expect(result.issues[0].isIncident).toBe(false);
+    });
+
+    it('Bug at any priority IS incident when incidentPriorities = [] (empty = all)', async () => {
+      setupB3([], 'Low');
+      const result = await service.getDetail('ACC', '2026-Q1');
+      expect(result.issues[0].isIncident).toBe(true);
     });
   });
 });

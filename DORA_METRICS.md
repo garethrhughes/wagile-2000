@@ -105,8 +105,10 @@ workingDaysBetween(start: Date, end: Date): number
    day boundary occurs, correctly handling DST transitions.
 3. Time accumulated within each day is multiplied by whether that day is a
    working day (per `workDays`) and whether it is not a configured holiday.
-4. The total working milliseconds are divided by `hoursPerDay × 3,600,000` to
-   convert to working-day units.
+4. The total working milliseconds are divided by `24 × 3,600,000` (24 calendar
+   hours) to convert to day units. `hoursPerDay` is **not** used as a divisor
+   in the working-day calculation — it is available for display purposes only.
+   See Proposal 0029, §Algorithm Design for full rationale.
 
 **MTTR exception:** MTTR is always computed in **calendar hours**, regardless
 of `excludeWeekends`. Incidents are production events; their resolution clock
@@ -660,7 +662,7 @@ median across all boards.
 workingTime:
   excludeWeekends: true      # false = use calendar days for cycle/lead time
   workDays: [1, 2, 3, 4, 5] # ISO weekday numbers (0=Sun … 6=Sat)
-  hoursPerDay: 8             # normalisation divisor (raw hours / 8 = working days)
+  hoursPerDay: 8             # display label only; does NOT affect numeric threshold calculations
   holidays:                  # YYYY-MM-DD, matched in TIMEZONE
     - "2026-01-01"
 ```
