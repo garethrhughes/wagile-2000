@@ -8,6 +8,7 @@ import {
   BoardConfig,
   RoadmapConfig,
   JpdIdea,
+  JiraIssueLink,
 } from '../database/entities/index.js';
 
 // ---------------------------------------------------------------------------
@@ -74,6 +75,7 @@ describe('QuarterDetailService', () => {
   let boardConfigRepo: jest.Mocked<Repository<BoardConfig>>;
   let roadmapConfigRepo: jest.Mocked<Repository<RoadmapConfig>>;
   let jpdIdeaRepo: jest.Mocked<Repository<JpdIdea>>;
+  let issueLinkRepo: jest.Mocked<Repository<JiraIssueLink>>;
 
   beforeEach(() => {
     issueRepo = mockRepo<JiraIssue>();
@@ -81,6 +83,7 @@ describe('QuarterDetailService', () => {
     boardConfigRepo = mockRepo<BoardConfig>();
     roadmapConfigRepo = mockRepo<RoadmapConfig>();
     jpdIdeaRepo = mockRepo<JpdIdea>();
+    issueLinkRepo = mockRepo<JiraIssueLink>();
 
     service = new QuarterDetailService(
       issueRepo,
@@ -88,6 +91,7 @@ describe('QuarterDetailService', () => {
       boardConfigRepo,
       roadmapConfigRepo,
       jpdIdeaRepo,
+      issueLinkRepo,
       mockConfigService(),
     );
   });
@@ -326,6 +330,7 @@ describe('QuarterDetailService', () => {
         boardConfigRepo,
         roadmapConfigRepo,
         jpdIdeaRepo,
+        issueLinkRepo,
         mockConfigService('https://myorg.atlassian.net'),
       );
 
@@ -562,6 +567,78 @@ describe('QuarterDetailService', () => {
       setupB3([], 'Low');
       const result = await service.getDetail('ACC', '2026-Q1');
       expect(result.issues[0].isIncident).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // failureLinkTypes AND-gate (Proposal 0032)
+  // -------------------------------------------------------------------------
+
+  describe('failureLinkTypes AND-gate', () => {
+    /**
+     * Sets up a scrum board with one Bug issue (ACC-1) that entered Q1 via a
+     * Sprint changelog on Jan 10.  The issueLinkRepo mock returns linkRows.
+     */
+    function setupLinkGateTest(
+      failureLinkTypes: string[],
+      linkRows: object[],
+    ) {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'ACC',
+        boardType: 'scrum',
+        doneStatusNames: ['Done'],
+        failureIssueTypes: ['Bug'],
+        failureLabels: [],
+        failureLinkTypes,
+        incidentIssueTypes: [],
+        incidentLabels: [],
+        incidentPriorities: [],
+        backlogStatusIds: [],
+      } as unknown as BoardConfig);
+
+      issueRepo.find.mockResolvedValue([
+        makeIssue({ key: 'ACC-1', issueType: 'Bug', createdAt: new Date('2026-01-10T09:00:00Z') }),
+      ]);
+
+      changelogRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([
+          makeChangelog({
+            issueKey: 'ACC-1',
+            field: 'Sprint',
+            fromValue: null,
+            toValue: 'Sprint 1',
+            changedAt: new Date('2026-01-10T09:00:00Z'),
+          }),
+        ]),
+      });
+
+      roadmapConfigRepo.find.mockResolvedValue([]);
+
+      issueLinkRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(linkRows),
+      });
+    }
+
+    it('does NOT mark as isFailure when failureLinkTypes is set and no matching link', async () => {
+      setupLinkGateTest(['caused by'], []); // no causal links
+
+      const result = await service.getDetail('ACC', '2026-Q1');
+
+      expect(result.issues[0].isFailure).toBe(false);
+    });
+
+    it('marks as isFailure when failureLinkTypes is set and matching link present', async () => {
+      setupLinkGateTest(['caused by'], [{ key: 'ACC-1' }]);
+
+      const result = await service.getDetail('ACC', '2026-Q1');
+
+      expect(result.issues[0].isFailure).toBe(true);
     });
   });
 });

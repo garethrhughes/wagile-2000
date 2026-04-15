@@ -8,6 +8,7 @@ import {
   BoardConfig,
   RoadmapConfig,
   JpdIdea,
+  JiraIssueLink,
 } from '../database/entities/index.js';
 
 // ---------------------------------------------------------------------------
@@ -78,6 +79,7 @@ describe('WeekDetailService', () => {
   let boardConfigRepo: jest.Mocked<Repository<BoardConfig>>;
   let roadmapConfigRepo: jest.Mocked<Repository<RoadmapConfig>>;
   let jpdIdeaRepo: jest.Mocked<Repository<JpdIdea>>;
+  let issueLinkRepo: jest.Mocked<Repository<JiraIssueLink>>;
 
   function kanbanConfig(overrides: object = {}): BoardConfig {
     return {
@@ -100,6 +102,7 @@ describe('WeekDetailService', () => {
     boardConfigRepo = mockRepo<BoardConfig>();
     roadmapConfigRepo = mockRepo<RoadmapConfig>();
     jpdIdeaRepo = mockRepo<JpdIdea>();
+    issueLinkRepo = mockRepo<JiraIssueLink>();
 
     service = new WeekDetailService(
       issueRepo,
@@ -107,6 +110,7 @@ describe('WeekDetailService', () => {
       boardConfigRepo,
       roadmapConfigRepo,
       jpdIdeaRepo,
+      issueLinkRepo,
       mockConfigService(),
     );
   });
@@ -374,6 +378,7 @@ describe('WeekDetailService', () => {
         boardConfigRepo,
         roadmapConfigRepo,
         jpdIdeaRepo,
+        issueLinkRepo,
         mockConfigService('https://myorg.atlassian.net'),
       );
       boardConfigRepo.findOne.mockResolvedValue(kanbanConfig());
@@ -552,6 +557,80 @@ describe('WeekDetailService', () => {
       setupB3([], 'Low');
       const result = await service.getDetail('PLAT', WEEK);
       expect(result.issues[0].isIncident).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // failureLinkTypes AND-gate (Proposal 0032)
+  // -------------------------------------------------------------------------
+
+  describe('failureLinkTypes AND-gate', () => {
+    /**
+     * Sets up a kanban board with one Bug issue (PLAT-1) that entered the
+     * board in W02 via a "To Do" exit changelog.  The issueLinkRepo mock
+     * returns the given linkRows.
+     */
+    function setupLinkGateTest(
+      failureLinkTypes: string[],
+      linkRows: object[],
+    ) {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'PLAT',
+        boardType: 'kanban',
+        doneStatusNames: ['Done'],
+        failureIssueTypes: ['Bug'],
+        failureLabels: [],
+        failureLinkTypes,
+        incidentIssueTypes: [],
+        incidentLabels: [],
+        incidentPriorities: [],
+        backlogStatusIds: [],
+        dataStartDate: null,
+      } as unknown as BoardConfig);
+
+      issueRepo.find.mockResolvedValue([
+        makeIssue({ key: 'PLAT-1', issueType: 'Bug', createdAt: new Date('2025-12-01T00:00:00Z') }),
+      ]);
+
+      changelogRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([
+          makeChangelog({
+            issueKey: 'PLAT-1',
+            field: 'status',
+            fromValue: 'To Do',
+            toValue: 'In Progress',
+            changedAt: new Date('2026-01-06T09:00:00Z'), // W02
+          }),
+        ]),
+      });
+
+      roadmapConfigRepo.find.mockResolvedValue([]);
+
+      issueLinkRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(linkRows),
+      });
+    }
+
+    it('does NOT mark as isFailure when failureLinkTypes is set and no matching link', async () => {
+      setupLinkGateTest(['caused by'], []); // no causal links
+
+      const result = await service.getDetail('PLAT', WEEK);
+
+      expect(result.issues[0].isFailure).toBe(false);
+    });
+
+    it('marks as isFailure when failureLinkTypes is set and matching link present', async () => {
+      setupLinkGateTest(['caused by'], [{ key: 'PLAT-1' }]);
+
+      const result = await service.getDetail('PLAT', WEEK);
+
+      expect(result.issues[0].isFailure).toBe(true);
     });
   });
 });

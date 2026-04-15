@@ -4,6 +4,7 @@ import {
   BoardConfig,
   JiraChangelog,
   JiraIssue,
+  JiraIssueLink,
   JpdIdea,
   RoadmapConfig,
 } from '../database/entities/index.js';
@@ -18,6 +19,7 @@ import { WeekDetailService } from './week-detail.service.js';
       BoardConfig,
       RoadmapConfig,
       JpdIdea,
+      JiraIssueLink,
     ]),
   ],
   controllers: [WeekController],

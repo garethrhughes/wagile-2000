@@ -10,6 +10,7 @@ import {
   BoardConfig,
   JiraChangelog,
   JiraIssue,
+  JiraIssueLink,
   JpdIdea,
   RoadmapConfig,
 } from '../database/entities/index.js';
@@ -113,6 +114,8 @@ export class QuarterDetailService {
     private readonly roadmapConfigRepo: Repository<RoadmapConfig>,
     @InjectRepository(JpdIdea)
     private readonly jpdIdeaRepo: Repository<JpdIdea>,
+    @InjectRepository(JiraIssueLink)
+    private readonly issueLinkRepo: Repository<JiraIssueLink>,
     private readonly configService: ConfigService,
   ) {
     const baseUrl = this.configService.get<string>('JIRA_BASE_URL', '');
@@ -143,6 +146,7 @@ export class QuarterDetailService {
     const incidentPriorities: string[] = boardConfig?.incidentPriorities ?? ['Critical', 'Highest', 'P1', 'P2'];
     const failureIssueTypes: string[] = boardConfig?.failureIssueTypes ?? ['Bug', 'Incident'];
     const failureLabels: string[] = boardConfig?.failureLabels ?? ['regression', 'incident', 'hotfix'];
+    const failureLinkTypes: string[] = boardConfig?.failureLinkTypes ?? [];
     const boardType: string = boardConfig?.boardType ?? 'scrum';
     const backlogStatusIds: string[] = boardConfig?.backlogStatusIds ?? [];
 
@@ -243,6 +247,28 @@ export class QuarterDetailService {
     }
 
     // -----------------------------------------------------------------------
+    // Step 6b — failureLinkTypes AND-gate: bulk causal-link query
+    //
+    // When failureLinkTypes is non-empty, only issues with a matching causal
+    // link (e.g. 'caused by') are classified as failures.  When
+    // failureLinkTypes is empty (the default), all type/label matches qualify.
+    // See Proposal 0032.
+    // -----------------------------------------------------------------------
+    const quarterIssueKeys = quarterIssues.map((i) => i.key);
+    let keysWithCausalLink = new Set<string>();
+    if (failureLinkTypes.length > 0) {
+      const linkRows = await this.issueLinkRepo
+        .createQueryBuilder('l')
+        .select('l.sourceIssueKey', 'key')
+        .where('l.sourceIssueKey IN (:...keys)', { keys: quarterIssueKeys })
+        .andWhere('LOWER(l.linkTypeName) IN (:...types)', {
+          types: failureLinkTypes.map((t) => t.toLowerCase()),
+        })
+        .getRawMany<{ key: string }>();
+      keysWithCausalLink = new Set(linkRows.map((r) => r.key));
+    }
+
+    // -----------------------------------------------------------------------
     // Step 7 — Load RoadmapConfig and build coveredEpicKeys
     // -----------------------------------------------------------------------
     const roadmapConfigs = await this.roadmapConfigRepo.find({ where: {} });
@@ -296,16 +322,17 @@ export class QuarterDetailService {
         (incidentPriorities.length === 0 ||
           incidentPriorities.includes(issue.priority ?? ''));
 
-      // isFailure
-      // NOTE: The causal-link AND-gate used by CfrService (failureLinkTypes) is
-      // intentionally not applied here.  The quarter detail view shows all issues
-      // that match failureIssueTypes + incidentPriorities regardless of whether
-      // they carry a causal link to a deployment.  This provides a broader
-      // "incidents in this period" view rather than the strict CFR numerator.
-      // See proposal 0030 §Fix B-5 for rationale.
-      const isFailure =
+      // isFailure: type/label match AND causal-link gate
+      // failureLinkTypes AND-gate: when configured, only issues with a matching
+      // causal link (e.g. 'caused by') are classified as failures.  When
+      // failureLinkTypes is empty (the default), all type/label matches qualify.
+      // See Proposal 0032.
+      const passesTypeGate =
         failureIssueTypes.includes(issue.issueType) ||
         (failureLabels.length > 0 && issue.labels.some((l) => failureLabels.includes(l)));
+      const passesLinkGate =
+        failureLinkTypes.length === 0 || keysWithCausalLink.has(issue.key);
+      const isFailure = passesTypeGate && passesLinkGate;
 
       // jiraUrl
       const jiraUrl = this.jiraBaseUrl

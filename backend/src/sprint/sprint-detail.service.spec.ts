@@ -9,6 +9,7 @@ import {
   BoardConfig,
   JpdIdea,
   RoadmapConfig,
+  JiraIssueLink,
 } from '../database/entities/index.js';
 import { WorkingTimeService } from '../metrics/working-time.service.js';
 
@@ -71,6 +72,7 @@ describe('SprintDetailService', () => {
   let boardConfigRepo: jest.Mocked<Repository<BoardConfig>>;
   let jpdIdeaRepo: jest.Mocked<Repository<JpdIdea>>;
   let roadmapConfigRepo: jest.Mocked<Repository<RoadmapConfig>>;
+  let issueLinkRepo: jest.Mocked<Repository<JiraIssueLink>>;
   let workingTimeService: jest.Mocked<WorkingTimeService>;
 
   beforeEach(() => {
@@ -80,6 +82,7 @@ describe('SprintDetailService', () => {
     boardConfigRepo = mockRepo<BoardConfig>();
     jpdIdeaRepo = mockRepo<JpdIdea>();
     roadmapConfigRepo = mockRepo<RoadmapConfig>();
+    issueLinkRepo = mockRepo<JiraIssueLink>();
     workingTimeService = mockWorkingTimeService();
 
     service = new SprintDetailService(
@@ -89,6 +92,7 @@ describe('SprintDetailService', () => {
       boardConfigRepo,
       jpdIdeaRepo,
       roadmapConfigRepo,
+      issueLinkRepo,
       mockConfigService(),
       workingTimeService,
     );
@@ -1470,6 +1474,7 @@ describe('SprintDetailService', () => {
       boardConfigRepo,
       jpdIdeaRepo,
       roadmapConfigRepo,
+      issueLinkRepo,
       mockConfigService('https://myco.atlassian.net'),
       workingTimeService,
     );
@@ -1835,6 +1840,115 @@ describe('SprintDetailService', () => {
       const result = await service.getDetail('ACC', 'sprint-1');
 
       expect(result.issues[0].isIncident).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // failureLinkTypes AND-gate (Proposal 0032)
+  // ---------------------------------------------------------------------------
+
+  describe('failureLinkTypes AND-gate', () => {
+    /**
+     * Helper: sets up a sprint with a single Bug issue (ACC-1) and two
+     * changelog query builder calls (Sprint, then status).
+     * The issueLinkRepo createQueryBuilder is a separate mock.
+     */
+    function setupLinkGateTest(
+      failureLinkTypes: string[],
+      linkRows: object[],
+    ) {
+      sprintRepo.findOne.mockResolvedValue(SPRINT);
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'ACC',
+        boardType: 'scrum',
+        doneStatusNames: ['Done'],
+        failureIssueTypes: ['Bug'],
+        failureLabels: [],
+        failureLinkTypes,
+        incidentIssueTypes: [],
+        incidentLabels: [],
+        incidentPriorities: [],
+        cancelledStatusNames: ['Cancelled'],
+      } as unknown as BoardConfig);
+
+      issueRepo.find.mockResolvedValue([
+        {
+          key: 'ACC-1',
+          boardId: 'ACC',
+          issueType: 'Bug',
+          summary: 'A bug',
+          status: 'In Progress',
+          sprintId: 'sprint-1',
+          epicKey: null,
+          labels: [],
+          points: null,
+          priority: null,
+          createdAt: new Date('2026-01-03T00:00:00Z'),
+        } as unknown as JiraIssue,
+      ]);
+      roadmapConfigRepo.find.mockResolvedValue([]);
+
+      let qbCallCount = 0;
+      changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+        qbCallCount++;
+        if (qbCallCount === 1) {
+          return makeQb([
+            {
+              issueKey: 'ACC-1',
+              field: 'Sprint',
+              toValue: 'Sprint 1',
+              fromValue: null,
+              changedAt: new Date('2026-01-04T00:00:00Z'),
+            },
+          ]);
+        }
+        return makeQb([]);
+      });
+
+      // issueLinkRepo mock: returns the given linkRows
+      issueLinkRepo.createQueryBuilder = jest.fn().mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue(linkRows),
+      });
+    }
+
+    it('does NOT mark as isFailure when failureLinkTypes is set and issue has no matching link', async () => {
+      setupLinkGateTest(['caused by'], []); // no causal links found
+
+      const result = await service.getDetail('ACC', 'sprint-1');
+
+      expect(result.issues[0].isFailure).toBe(false);
+    });
+
+    it('marks as isFailure when failureLinkTypes is set and issue has a matching causal link', async () => {
+      setupLinkGateTest(['caused by'], [{ key: 'ACC-1' }]); // link found
+
+      const result = await service.getDetail('ACC', 'sprint-1');
+
+      expect(result.issues[0].isFailure).toBe(true);
+    });
+
+    it('marks as isFailure when failureLinkTypes is empty (default — no AND-gate applied)', async () => {
+      // failureLinkTypes = [] means gate is skipped entirely
+      setupLinkGateTest([], []);
+
+      const result = await service.getDetail('ACC', 'sprint-1');
+
+      // Gate skipped: Bug matches failureIssueTypes → isFailure = true
+      expect(result.issues[0].isFailure).toBe(true);
+      // issueLinkRepo should NOT have been called
+      expect(issueLinkRepo.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('link type matching is case-insensitive', async () => {
+      // Config uses title-case; link row uses lower-case — must still match
+      setupLinkGateTest(['Caused By'], [{ key: 'ACC-1' }]);
+
+      const result = await service.getDetail('ACC', 'sprint-1');
+
+      expect(result.issues[0].isFailure).toBe(true);
     });
   });
 });
