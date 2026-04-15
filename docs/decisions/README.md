@@ -32,3 +32,12 @@ a new ADR is created for the replacement decision.
 | [0018](0018-exclude-epics-and-subtasks-from-metrics.md) | Exclude Epics and Sub-tasks from all metric calculations via shared `isWorkItem()` utility | Accepted | 2026-04-12 |
 | [0019](0019-broaden-in-progress-status-names-default.md) | Broaden `inProgressStatusNames` default for cycle-time start detection | Accepted | 2026-04-12 |
 | [0020](0020-no-application-level-authentication.md) | No application-level authentication; CORS as sole access control | Accepted | 2026-04-12 |
+| [0021](0021-jira-field-ids-externalised-to-yaml-config.md) | Jira instance-specific field IDs externalised to YAML config and singleton DB entity | Accepted | 2026-04-15 |
+| [0022](0022-no-db-dependency-in-jira-client-service.md) | No DB dependency in `JiraClientService`; field IDs passed as parameters from `SyncService` | Accepted | 2026-04-15 |
+| [0023](0023-jpd-delivery-link-scalar-or-array.md) | `jpdDeliveryLinkInward` / `jpdDeliveryLinkOutward` accept string or array in YAML config | Accepted | 2026-04-15 |
+| [0024](0024-weekend-exclusion-from-cycle-time-and-lead-time.md) | Weekend exclusion from cycle time and lead time by default via `WorkingTimeService` | Accepted | 2026-04-15 |
+| [0025](0025-mttr-uses-calendar-hours-not-working-hours.md) | MTTR uses calendar hours, not working hours | Accepted | 2026-04-15 |
+| [0026](0026-hours-per-day-as-normalisation-factor.md) | `hoursPerDay` is a normalisation factor, not a clock-hour boundary | Accepted | 2026-04-15 |
+| [0027](0027-day-boundary-algorithm-uses-intl-binary-search.md) | Day-boundary algorithm uses `Intl.DateTimeFormat` with binary search | Accepted | 2026-04-15 |
+| [0028](0028-global-working-time-config-not-per-board.md) | Global working-time config singleton, not per-board | Accepted | 2026-04-15 |
+| [0029](0029-mit-license.md) | MIT License | Accepted | 2026-04-15 |
