@@ -149,8 +149,8 @@ Or use the provided Docker Compose file:
 docker compose up -d
 ```
 
-> **Note:** `docker-compose.yml` defaults to the database name `ai_starter`. If you want to use
-> a different name (e.g. `fragile`), edit both `docker-compose.yml` (the `POSTGRES_DB`
+> **Note:** `docker-compose.yml` defaults to the database name `fragile`. If you want to use
+> a different name, edit both `docker-compose.yml` (the `POSTGRES_DB`
 > environment variable) and `DB_DATABASE` in `backend/.env` to match.
 
 ### 3. Configure the backend
@@ -380,7 +380,7 @@ minute or two depending on the number of issues and boards. Subsequent syncs are
 | `DB_PORT` | No | `5432` | PostgreSQL port |
 | `DB_USERNAME` | No | `postgres` | PostgreSQL username |
 | `DB_PASSWORD` | No | `postgres` | PostgreSQL password |
-| `DB_DATABASE` | No | `ai_starter` | PostgreSQL database name (must match `docker-compose.yml`) |
+| `DB_DATABASE` | No | `fragile` | PostgreSQL database name (must match `docker-compose.yml`) |
 | `PORT` | No | `3001` | Port the NestJS server listens on |
 | `FRONTEND_URL` | No | `http://localhost:3000` | Allowed CORS origin for the frontend |
 | `TIMEZONE` | No | `UTC` | IANA timezone string used for quarter/week boundary calculations, e.g. `America/New_York` |
@@ -720,7 +720,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: ai_starter   # Change this AND DB_DATABASE in backend/.env to match
+      POSTGRES_DB: fragile
     volumes:
       - pgdata:/var/lib/postgresql/data
 

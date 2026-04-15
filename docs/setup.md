@@ -40,7 +40,7 @@ A dedicated read-only service account is recommended for production use.
 docker compose up -d
 ```
 
-This starts PostgreSQL 16 on port 5432 with database `ai_starter`, user `postgres`,
+This starts PostgreSQL 16 on port 5432 with database `fragile`, user `postgres`,
 password `postgres`. Edit `docker-compose.yml` if you need different values.
 
 ---
@@ -62,7 +62,7 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_USERNAME=postgres
 DB_PASSWORD=postgres
-DB_DATABASE=ai_starter
+DB_DATABASE=fragile
 
 PORT=3001
 FRONTEND_URL=http://localhost:3000
