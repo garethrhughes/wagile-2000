@@ -189,6 +189,127 @@ describe('WorkingTimeService — workingDaysBetween', () => {
   });
 });
 
+describe('WorkingTimeService — timezone boundary correctness', () => {
+  let service: WorkingTimeService;
+
+  beforeEach(() => {
+    service = buildService();
+  });
+
+  // -------------------------------------------------------------------------
+  // America/New_York (negative UTC offset — EDT = UTC-4 in April 2026)
+  // -------------------------------------------------------------------------
+  // DST in 2026: clocks spring forward on 2026-03-08 → April is UTC-4 (EDT).
+  //
+  // Friday April 17 NY local: 2026-04-17T04:00:00Z → 2026-04-18T04:00:00Z
+  // Monday April 20 NY local: 2026-04-20T04:00:00Z → 2026-04-21T04:00:00Z
+  //
+  // Span: 2026-04-17T22:00:00Z (Fri 18:00 EDT) → 2026-04-20T13:00:00Z (Mon 09:00 EDT)
+  // Expected: Friday portion (22:00Z–04:00Z = 6h) + Monday portion (04:00Z–13:00Z = 9h) = 15h
+  // Saturday and Sunday are not working days and must contribute 0h.
+
+  it('America/New_York: Fri 18:00 EDT → Mon 09:00 EDT counts only Friday and Monday hours', () => {
+    const config: WorkingTimeConfig = {
+      timezone: 'America/New_York',
+      workDays: [1, 2, 3, 4, 5],
+      hoursPerDay: 8,
+      holidays: [],
+    };
+    const start = new Date('2026-04-17T22:00:00Z'); // Fri 18:00 EDT
+    const end = new Date('2026-04-20T13:00:00Z');   // Mon 09:00 EDT
+    // 6h Friday + 9h Monday = 15h; Sat/Sun = 0h
+    expect(service.workingHoursBetween(start, end, config)).toBe(15);
+  });
+
+  it('America/New_York: full Saturday returns 0', () => {
+    const config: WorkingTimeConfig = {
+      timezone: 'America/New_York',
+      workDays: [1, 2, 3, 4, 5],
+      hoursPerDay: 8,
+      holidays: [],
+    };
+    // Saturday April 18 NY: 2026-04-18T04:00:00Z → 2026-04-19T04:00:00Z
+    const start = new Date('2026-04-18T04:00:00Z');
+    const end = new Date('2026-04-19T04:00:00Z');
+    expect(service.workingHoursBetween(start, end, config)).toBe(0);
+  });
+
+  it('America/New_York: full Monday returns 24h', () => {
+    const config: WorkingTimeConfig = {
+      timezone: 'America/New_York',
+      workDays: [1, 2, 3, 4, 5],
+      hoursPerDay: 8,
+      holidays: [],
+    };
+    // Monday April 20 NY: 2026-04-20T04:00:00Z → 2026-04-21T04:00:00Z
+    const start = new Date('2026-04-20T04:00:00Z');
+    const end = new Date('2026-04-21T04:00:00Z');
+    expect(service.workingHoursBetween(start, end, config)).toBe(24);
+  });
+
+  // -------------------------------------------------------------------------
+  // Australia/Sydney (positive UTC offset — AEST = UTC+10 in April 2026)
+  // -------------------------------------------------------------------------
+  // DST in 2026: clocks fall back on 2026-04-05 (first Sunday April).
+  // April 13 onwards is AEST UTC+10.
+  //
+  // Monday April 13 Sydney local: 2026-04-13T14:00:00Z → 2026-04-14T14:00:00Z
+  // Tuesday April 14 Sydney local: 2026-04-14T14:00:00Z → 2026-04-15T14:00:00Z
+
+  it('Australia/Sydney: full Monday (AEST) returns 24h', () => {
+    const config: WorkingTimeConfig = {
+      timezone: 'Australia/Sydney',
+      workDays: [1, 2, 3, 4, 5],
+      hoursPerDay: 8,
+      holidays: [],
+    };
+    // Mon April 13 AEST (UTC+10): midnight = 2026-04-12T14:00:00Z
+    // Tue April 14 AEST midnight  = 2026-04-13T14:00:00Z
+    const start = new Date('2026-04-12T14:00:00Z');
+    const end = new Date('2026-04-13T14:00:00Z');
+    expect(service.workingHoursBetween(start, end, config)).toBe(24);
+  });
+
+  it('Australia/Sydney: Fri 18:00 AEST → Mon 09:00 AEST counts only Friday and Monday hours', () => {
+    const config: WorkingTimeConfig = {
+      timezone: 'Australia/Sydney',
+      workDays: [1, 2, 3, 4, 5],
+      hoursPerDay: 8,
+      holidays: [],
+    };
+    // AEST = UTC+10. local = UTC + 10h, so local midnight = UTC - 10h.
+    //
+    // Fri April 17 AEST: dayStart = 2026-04-16T14:00:00Z, nextDayStart = 2026-04-17T14:00:00Z
+    // Fri 18:00 AEST = 2026-04-17T08:00:00Z
+    //   → Friday portion: 2026-04-17T08:00:00Z → 2026-04-17T14:00:00Z = 6h ✓
+    //
+    // Sat/Sun: skipped (not work days)
+    //
+    // Mon April 20 AEST: dayStart = 2026-04-19T14:00:00Z, nextDayStart = 2026-04-20T14:00:00Z
+    // Mon 09:00 AEST = April 20 09:00 - 10h = April 19 23:00 UTC = 2026-04-19T23:00:00Z
+    //   → Monday portion: 2026-04-19T14:00:00Z → 2026-04-19T23:00:00Z = 9h ✓
+    //
+    // Total = 6h + 9h = 15h
+    const start = new Date('2026-04-17T08:00:00Z'); // Fri 18:00 AEST
+    const end = new Date('2026-04-19T23:00:00Z');   // Mon 09:00 AEST
+    expect(service.workingHoursBetween(start, end, config)).toBe(15);
+  });
+
+  it('Australia/Sydney: full Saturday (AEST) returns 0', () => {
+    const config: WorkingTimeConfig = {
+      timezone: 'Australia/Sydney',
+      workDays: [1, 2, 3, 4, 5],
+      hoursPerDay: 8,
+      holidays: [],
+    };
+    // Sat April 18 AEST (UTC+10): midnight = 2026-04-17T14:00:00Z
+    // Sun April 19 AEST midnight  = 2026-04-18T14:00:00Z
+    const start = new Date('2026-04-17T14:00:00Z');
+    const end = new Date('2026-04-18T14:00:00Z');
+    expect(service.workingHoursBetween(start, end, config)).toBe(0);
+  });
+});
+
 describe('WorkingTimeService — getConfig / toConfig', () => {
   it('returns in-memory default when no DB row found', async () => {
     const service = buildService();
