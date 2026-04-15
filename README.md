@@ -18,13 +18,25 @@ team that operates it.
 
 ## Screenshots
 
-<!-- Add screenshots here once the UI is stable. Suggested shots:
-     - DORA dashboard (all boards, quarter view)
-     - Cycle Time scatter plot with percentile cards
-     - Sprint Planning table
-     - Roadmap Accuracy board breakdown
-     - Settings page (board config editor)
--->
+**DORA Metrics** — organisation-wide delivery performance across all boards
+
+![DORA Metrics](docs/screenshots/dora.png)
+
+**Cycle Time** — distribution scatter plot with percentile cards and trend
+
+![Cycle Time](docs/screenshots/cycle-time.png)
+
+**Planning Accuracy** — sprint commitment vs delivery with scope change tracking
+
+![Planning Accuracy](docs/screenshots/planning.png)
+
+**Roadmap Accuracy** — sprint work aligned to JPD roadmap items
+
+![Roadmap Accuracy](docs/screenshots/roadmap.png)
+
+**Issues Gaps** — open issues missing epic links or story point estimates
+
+![Issues Gaps](docs/screenshots/gaps.png)
 
 ---
 
