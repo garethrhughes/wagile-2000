@@ -191,9 +191,8 @@ describe('SyncService', () => {
       ]);
 
       // Make ensureBoardConfig throw to force syncBoard failure
-      boardConfigRepo.findOne
-        .mockResolvedValueOnce(defaultFieldConfig as unknown as BoardConfig) // jiraFieldConfigRepo.findOne
-        .mockRejectedValueOnce(new Error('DB down'));
+      // jiraFieldConfigRepo.findOne already returns defaultFieldConfig in beforeEach
+      boardConfigRepo.findOne.mockRejectedValueOnce(new Error('DB down'));
 
       syncLogRepo.save.mockImplementation((log) => Promise.resolve(log as SyncLog));
 
