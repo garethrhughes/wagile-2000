@@ -35,7 +35,7 @@ resource "aws_apprunner_service" "backend" {
           NODE_ENV    = "production"
           PORT        = "3001"
           DB_PORT     = "5432"
-          DB_DATABASE = "ai_starter"
+          DB_DATABASE = "fragile"
           DB_USERNAME = "postgres"
           # DB_HOST is injected directly because App Runner's secrets block
           # only supports Secrets Manager ARNs and SSM param ARNs, not plain
