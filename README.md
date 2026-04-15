@@ -54,7 +54,9 @@ from the DORA research thresholds, and a board breakdown table allows comparison
 The Cycle Time page plots individual issue cycle times on a scatter chart with a trend line. Three
 percentile cards (p50, p75, p95) summarise the distribution. Each data point is annotated with its
 DORA band. Epics and sub-tasks are excluded from all cycle time calculations. Supports per-board
-filtering and week/quarter time range toggles.
+filtering and week/quarter time range toggles. Cycle times are measured in **working days** by
+default (weekends and configured public holidays excluded); the unit label adapts to "calendar days"
+when weekend exclusion is disabled.
 
 ### Planning (Sprint)
 
@@ -95,6 +97,16 @@ on the next data request without requiring a restart.
 A manual sync button in the Settings page triggers a full refresh of sprints, issues, changelogs,
 versions, and JPD ideas from Jira. Sync status and last-synced timestamps are displayed per board.
 Sync history (issue count, status, error messages) is stored in the `sync_logs` table.
+
+### Working-Time Calculation
+
+Cycle time and lead time durations exclude weekends (and optionally configured public holidays) by
+default. The `WorkingTimeService` walks calendar boundaries in the configured `TIMEZONE` using
+`Intl.DateTimeFormat` with a binary-search algorithm to handle Daylight Saving Time correctly.
+MTTR is measured in **calendar hours** (incidents are production events that do not pause on
+weekends). Deployment frequency uses **calendar days** (unchanged). Weekend exclusion and the
+working-day definition are configurable via the `workingTime:` stanza in `boards.yaml` or through
+`GET /api/config`.
 
 ---
 
@@ -395,7 +407,7 @@ minute or two depending on the number of issues and boards. Subsequent syncs are
 | `DB_DATABASE` | No | `fragile` | PostgreSQL database name (must match `docker-compose.yml`) |
 | `PORT` | No | `3001` | Port the NestJS server listens on |
 | `FRONTEND_URL` | No | `http://localhost:3000` | Allowed CORS origin for the frontend |
-| `TIMEZONE` | No | `UTC` | IANA timezone string used for quarter/week boundary calculations, e.g. `America/New_York` |
+| `TIMEZONE` | No | `UTC` | IANA timezone string used for quarter/week boundary calculations and working-time day boundaries, e.g. `America/New_York` |
 | `BOARD_CONFIG_FILE` | No | `config/boards.yaml` | Override path to the boards YAML file (absolute or relative to `backend/`) |
 | `ROADMAP_CONFIG_FILE` | No | `config/roadmap.yaml` | Override path to the roadmap YAML file (absolute or relative to `backend/`) |
 
@@ -490,6 +502,23 @@ Configuration can be managed in two ways:
 - **YAML files** — edit `backend/config/boards.yaml` and `backend/config/roadmap.yaml` before
   starting the backend. Values in YAML overwrite the database on every startup. See
   [YAML Configuration](#yaml-configuration) for the full workflow.
+
+For a step-by-step walkthrough including how to find tenant-specific Jira field IDs, see
+[`docs/setup.md`](docs/setup.md).
+
+### `GET /api/config`
+
+The backend exposes a lightweight config endpoint consumed by the frontend to adapt its UI labels:
+
+```json
+{
+  "timezone": "Australia/Sydney",
+  "excludeWeekends": true
+}
+```
+
+`excludeWeekends: true` causes the frontend to show "working days" as the unit for cycle time and
+lead time cards; `false` shows "calendar days".
 
 ### Board configuration
 
@@ -665,6 +694,48 @@ These values are stored in the `jira_field_config` table (singleton row, `id = 1
 per sync. If the `jira:` stanza is absent, the database values — seeded with the defaults above by
 the `AddJiraFieldConfig` migration — are left untouched.
 
+### `backend/config/boards.yaml` — `workingTime:` stanza (optional, top-level)
+
+`boards.yaml` also accepts an optional top-level `workingTime:` key that controls how cycle-time
+and lead-time durations are calculated. All fields inside the stanza are optional — any field
+omitted keeps its current database value. If the entire stanza is absent, the defaults below
+(Monday–Friday, 8 hours/day, no holidays, weekends excluded) are used.
+
+```yaml
+workingTime:
+  # Set to false to measure cycle time and lead time in raw calendar days.
+  # Default: true
+  excludeWeekends: true
+
+  # ISO weekday numbers that count as working days.
+  # 0 = Sunday, 1 = Monday, …, 6 = Saturday.
+  # Override for regions with a non-standard weekend (e.g. [0,1,2,3,4] for Sun–Thu).
+  # Default: [1, 2, 3, 4, 5]
+  workDays:
+    - 1  # Monday
+    - 2  # Tuesday
+    - 3  # Wednesday
+    - 4  # Thursday
+    - 5  # Friday
+
+  # Number of working hours in a standard day. Used as the divisor when converting
+  # raw working milliseconds into working-day units (raw_hours / hoursPerDay).
+  # This is a normalisation factor, NOT a work-hours-per-day limit.
+  # Default: 8
+  hoursPerDay: 8
+
+  # Public holidays to exclude from working-time calculations, in the tenant's
+  # local timezone (set via TIMEZONE env var). Format: YYYY-MM-DD.
+  # Default: []
+  holidays:
+    - "2026-01-01"  # New Year's Day
+    - "2026-04-25"  # ANZAC Day (example)
+```
+
+These values are stored in the `working_time_config` table (singleton row, `id = 1`) and take
+effect on the next data request without a restart. MTTR is always measured in calendar hours
+regardless of this configuration — incidents are production events that do not pause on weekends.
+
 ### `backend/config/roadmap.yaml` — field reference
 
 ```yaml
@@ -831,6 +902,7 @@ names in PostgreSQL.
 |---|---|---|---|
 | `BoardConfig` | `board_configs` | `boardId` (PK) | Per-board metric rules and status configuration |
 | `JiraFieldConfig` | `jira_field_config` | `id` (PK, always 1) | Singleton row storing tenant-specific Jira custom field IDs for story points and JPD delivery link type names |
+| `WorkingTimeConfig` | `working_time_config` | `id` (PK, always 1) | Singleton row controlling whether weekends are excluded from cycle-time and lead-time calculations, plus work-day definition, hours-per-day, and public holidays |
 | `JiraIssue` | `jira_issues` | `key` (PK), `boardId`, `sprintId`, `epicKey`, `issueType`, `status`, `statusId`, `points`, `labels`, `createdAt` | Snapshot of each Jira issue |
 | `JiraSprint` | `jira_sprints` | `id` (PK), `boardId`, `state`, `startDate`, `endDate` | Sprint metadata for Scrum boards |
 | `JiraChangelog` | `jira_changelogs` | `id` (PK, auto), `issueKey`, `field`, `fromValue`, `toValue`, `changedAt` | Full field-change history; used for sprint membership reconstruction and cycle time |
@@ -892,4 +964,4 @@ affect the data model, the Jira sync strategy, or the metric calculation logic.
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+MIT License — Copyright © 2025–2026 Gareth Hughes. See [LICENSE](LICENSE) for details.
