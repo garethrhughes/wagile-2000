@@ -11,6 +11,7 @@ import {
   RoadmapConfig,
   JpdIdea,
   JiraIssueLink,
+  JiraFieldConfig,
 } from '../database/entities/index.js';
 import { SprintReportService } from '../sprint-report/sprint-report.service.js';
 
@@ -62,6 +63,15 @@ function makeRawIssue(
   };
 }
 
+/** Default JiraFieldConfig row returned by the mock repo */
+const defaultFieldConfig: JiraFieldConfig = {
+  id: 1,
+  storyPointsFieldIds: ['story_points', 'customfield_10016', 'customfield_10026', 'customfield_10028', 'customfield_11031'],
+  epicLinkFieldId: 'customfield_10014',
+  jpdDeliveryLinkInward: ['is implemented by', 'is delivered by'],
+  jpdDeliveryLinkOutward: ['implements', 'delivers'],
+};
+
 // ---------------------------------------------------------------------------
 // Test suite
 // ---------------------------------------------------------------------------
@@ -79,6 +89,7 @@ describe('SyncService', () => {
   let jpdIdeaRepo: jest.Mocked<Repository<JpdIdea>>;
   let issueLinkRepo: jest.Mocked<Repository<JiraIssueLink>>;
   let sprintReportService: jest.Mocked<SprintReportService>;
+  let jiraFieldConfigRepo: jest.Mocked<Repository<JiraFieldConfig>>;
 
   beforeEach(() => {
     jiraClient = mockJiraClient();
@@ -94,6 +105,9 @@ describe('SyncService', () => {
     sprintReportService = {
       generateIfClosed: jest.fn().mockResolvedValue(undefined),
     } as unknown as jest.Mocked<SprintReportService>;
+    jiraFieldConfigRepo = mockRepo<JiraFieldConfig>();
+    // By default return the standard field config row
+    jiraFieldConfigRepo.findOne.mockResolvedValue(defaultFieldConfig);
 
     service = new SyncService(
       jiraClient,
@@ -107,6 +121,7 @@ describe('SyncService', () => {
       jpdIdeaRepo,
       issueLinkRepo,
       sprintReportService,
+      jiraFieldConfigRepo,
     );
   });
 
@@ -176,7 +191,8 @@ describe('SyncService', () => {
       ]);
 
       // Make ensureBoardConfig throw to force syncBoard failure
-      boardConfigRepo.findOne.mockRejectedValue(new Error('DB down'));
+      // jiraFieldConfigRepo.findOne already returns defaultFieldConfig in beforeEach
+      boardConfigRepo.findOne.mockRejectedValueOnce(new Error('DB down'));
 
       syncLogRepo.save.mockImplementation((log) => Promise.resolve(log as SyncLog));
 
@@ -258,6 +274,34 @@ describe('SyncService', () => {
       expect(jiraClient.getBoardsForProject).not.toHaveBeenCalled();
       expect(jiraClient.getSprints).toHaveBeenCalledWith('99');
     });
+
+    it('passes configured extra fields to getSprintIssues', async () => {
+      const customFieldConfig: JiraFieldConfig = {
+        ...defaultFieldConfig,
+        storyPointsFieldIds: ['customfield_10106'],
+        epicLinkFieldId: null,
+      };
+      jiraFieldConfigRepo.findOne.mockResolvedValue(customFieldConfig);
+
+      jiraClient.getSprints.mockResolvedValue({
+        values: [{ id: 1, name: 'Sprint 1', state: 'active' }],
+      } as never);
+      jiraClient.getSprintIssues.mockResolvedValue({
+        total: 0,
+        maxResults: 50,
+        issues: [],
+      } as never);
+      jiraClient.getIssueChangelog.mockResolvedValue({ total: 0, maxResults: 100, values: [] } as never);
+
+      await service.syncBoard('PROJ');
+
+      expect(jiraClient.getSprintIssues).toHaveBeenCalledWith(
+        '42',
+        '1',
+        0,
+        ['customfield_10106'],   // epicLinkFieldId null → not added
+      );
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -296,6 +340,37 @@ describe('SyncService', () => {
       expect(log.status).toBe('success');
       expect(log.issueCount).toBe(2);
       expect(jiraClient.searchIssues).toHaveBeenCalled();
+    });
+
+    it('passes configured extra fields to searchIssues', async () => {
+      const customFieldConfig: JiraFieldConfig = {
+        ...defaultFieldConfig,
+        storyPointsFieldIds: ['customfield_10106'],
+        epicLinkFieldId: 'customfield_10014',
+      };
+      jiraFieldConfigRepo.findOne.mockResolvedValue(customFieldConfig);
+
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'PLAT',
+        boardType: 'kanban',
+      } as BoardConfig);
+
+      jiraClient.getBoardsForProject.mockResolvedValue({
+        values: [{ id: 55, name: 'PLAT board', type: 'kanban' }],
+      } as never);
+      jiraClient.searchIssues.mockResolvedValue({
+        issues: [],
+        nextPageToken: undefined,
+      } as never);
+      jiraClient.getProjectVersions.mockResolvedValue([]);
+      syncLogRepo.save.mockImplementation((log) => Promise.resolve(log as SyncLog));
+
+      await service.syncBoard('PLAT');
+
+      const searchCall = jiraClient.searchIssues.mock.calls[0];
+      const calledExtraFields = searchCall[4] as string[];
+      expect(calledExtraFields).toContain('customfield_10106');
+      expect(calledExtraFields).toContain('customfield_10014');
     });
 
     it('paginates kanban issues until no nextPageToken', async () => {
@@ -389,6 +464,8 @@ describe('SyncService', () => {
     });
 
     it('creates a fallback scrum config when not found', async () => {
+      // First call (jiraFieldConfigRepo.findOne) → return defaultFieldConfig
+      // Second call (boardConfigRepo.findOne in ensureBoardConfig) → null
       boardConfigRepo.findOne.mockResolvedValue(null);
       boardConfigRepo.save.mockResolvedValue({ boardId: '42', boardType: 'scrum' } as BoardConfig);
       // Use numeric id to avoid getBoardsForProject
@@ -518,6 +595,72 @@ describe('SyncService', () => {
 
       const upsertCall = issueRepo.upsert.mock.calls[0][0] as JiraIssue[];
       expect(upsertCall[0].fixVersion).toBe('v1.0');
+    });
+
+    // -----------------------------------------------------------------------
+    // New tests: non-default field IDs and null epicLinkFieldId
+    // -----------------------------------------------------------------------
+
+    it('extracts story points from a non-default field ID (customfield_10106)', async () => {
+      const customFieldConfig: JiraFieldConfig = {
+        ...defaultFieldConfig,
+        storyPointsFieldIds: ['customfield_10106'],
+      };
+      jiraFieldConfigRepo.findOne.mockResolvedValue(customFieldConfig);
+
+      jiraClient.getSprintIssues.mockResolvedValue({
+        total: 1,
+        maxResults: 50,
+        issues: [makeRawIssue('PROJ-1', { customfield_10106: 13 })],
+      } as never);
+
+      await service.syncBoard('PROJ');
+
+      const upsertCall = issueRepo.upsert.mock.calls[0][0] as JiraIssue[];
+      expect(upsertCall[0].points).toBe(13);
+    });
+
+    it('null epicLinkFieldId disables the legacy Epic Link fallback', async () => {
+      const customFieldConfig: JiraFieldConfig = {
+        ...defaultFieldConfig,
+        epicLinkFieldId: null,
+      };
+      jiraFieldConfigRepo.findOne.mockResolvedValue(customFieldConfig);
+
+      jiraClient.getSprintIssues.mockResolvedValue({
+        total: 1,
+        maxResults: 50,
+        issues: [makeRawIssue('PROJ-1', {
+          // customfield_10014 is present but should be ignored
+          customfield_10014: 'PROJ-EPIC-99',
+        })],
+      } as never);
+
+      await service.syncBoard('PROJ');
+
+      const upsertCall = issueRepo.upsert.mock.calls[0][0] as JiraIssue[];
+      expect(upsertCall[0].epicKey).toBeNull();
+    });
+
+    it('uses custom epicLinkFieldId from config', async () => {
+      const customFieldConfig: JiraFieldConfig = {
+        ...defaultFieldConfig,
+        epicLinkFieldId: 'customfield_20001',
+      };
+      jiraFieldConfigRepo.findOne.mockResolvedValue(customFieldConfig);
+
+      jiraClient.getSprintIssues.mockResolvedValue({
+        total: 1,
+        maxResults: 50,
+        issues: [makeRawIssue('PROJ-1', {
+          customfield_20001: 'PROJ-EPIC-77',
+        })],
+      } as never);
+
+      await service.syncBoard('PROJ');
+
+      const upsertCall = issueRepo.upsert.mock.calls[0][0] as JiraIssue[];
+      expect(upsertCall[0].epicKey).toBe('PROJ-EPIC-77');
     });
   });
 
@@ -1050,6 +1193,85 @@ describe('SyncService', () => {
 
       const ideas = jpdIdeaRepo.upsert.mock.calls[0][0] as JpdIdea[];
       expect(ideas[0].deliveryIssueKeys).toEqual(['EPIC-2']);
+    });
+
+    it('detects delivery links from custom inward link type names', async () => {
+      // Override the field config to use custom JPD link type names
+      const customFieldConfig: JiraFieldConfig = {
+        ...defaultFieldConfig,
+        jpdDeliveryLinkInward: ['is built by'],
+        jpdDeliveryLinkOutward: ['builds'],
+      };
+      jiraFieldConfigRepo.findOne.mockResolvedValue(customFieldConfig);
+
+      roadmapConfigRepo.find.mockResolvedValue([{ jpdKey: 'JPD' } as RoadmapConfig]);
+      roadmapConfigRepo.findOne.mockResolvedValue({ jpdKey: 'JPD' } as RoadmapConfig);
+
+      jiraClient.getJpdIdeas.mockResolvedValue({
+        issues: [
+          {
+            key: 'JPD-10',
+            fields: {
+              summary: 'Idea 10',
+              status: { name: 'In Discovery' },
+              issuelinks: [
+                {
+                  type: { name: 'Builds', inward: 'is built by', outward: 'builds' },
+                  inwardIssue: { key: 'EPIC-10', fields: { issuetype: { name: 'Epic' } } },
+                },
+              ],
+            },
+          },
+        ],
+        nextPageToken: undefined,
+      } as never);
+
+      jpdIdeaRepo.upsert.mockResolvedValue(undefined as never);
+
+      await service.syncRoadmaps();
+
+      const ideas = jpdIdeaRepo.upsert.mock.calls[0][0] as JpdIdea[];
+      expect(ideas[0].deliveryIssueKeys).toEqual(['EPIC-10']);
+    });
+
+    it('does not detect delivery links when custom names do not match default names', async () => {
+      // Override to use custom link names that don't match the default Jira link
+      const customFieldConfig: JiraFieldConfig = {
+        ...defaultFieldConfig,
+        jpdDeliveryLinkInward: ['is built by'],
+        jpdDeliveryLinkOutward: ['builds'],
+      };
+      jiraFieldConfigRepo.findOne.mockResolvedValue(customFieldConfig);
+
+      roadmapConfigRepo.find.mockResolvedValue([{ jpdKey: 'JPD' } as RoadmapConfig]);
+      roadmapConfigRepo.findOne.mockResolvedValue({ jpdKey: 'JPD' } as RoadmapConfig);
+
+      jiraClient.getJpdIdeas.mockResolvedValue({
+        issues: [
+          {
+            key: 'JPD-11',
+            fields: {
+              summary: 'Idea 11',
+              status: { name: 'In Discovery' },
+              issuelinks: [
+                {
+                  // default link type — should NOT match custom config
+                  type: { name: 'Implements', inward: 'is implemented by', outward: 'implements' },
+                  inwardIssue: { key: 'EPIC-11', fields: { issuetype: { name: 'Epic' } } },
+                },
+              ],
+            },
+          },
+        ],
+        nextPageToken: undefined,
+      } as never);
+
+      jpdIdeaRepo.upsert.mockResolvedValue(undefined as never);
+
+      await service.syncRoadmaps();
+
+      const ideas = jpdIdeaRepo.upsert.mock.calls[0][0] as JpdIdea[];
+      expect(ideas[0].deliveryIssueKeys).toBeNull();
     });
 
     it('sets deliveryIssueKeys to null when no delivery links', async () => {

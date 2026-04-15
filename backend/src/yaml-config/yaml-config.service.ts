@@ -5,7 +5,7 @@ import { Repository } from 'typeorm';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
-import { BoardConfig, RoadmapConfig } from '../database/entities/index.js';
+import { BoardConfig, RoadmapConfig, JiraFieldConfig } from '../database/entities/index.js';
 import { BoardsYamlFileSchema } from './schemas/boards-yaml.schema.js';
 import { RoadmapYamlFileSchema } from './schemas/roadmap-yaml.schema.js';
 
@@ -14,6 +14,7 @@ export interface YamlSeedStatus {
   boardsApplied: number;
   roadmapFileFound: boolean;
   roadmapsApplied: number;
+  jiraFieldConfigApplied: boolean;
   lastAppliedAt: string | null;
   error: string | null;
 }
@@ -47,6 +48,7 @@ export class YamlConfigService implements OnApplicationBootstrap {
     boardsApplied: 0,
     roadmapFileFound: false,
     roadmapsApplied: 0,
+    jiraFieldConfigApplied: false,
     lastAppliedAt: null,
     error: null,
   };
@@ -56,6 +58,8 @@ export class YamlConfigService implements OnApplicationBootstrap {
     private readonly boardConfigRepo: Repository<BoardConfig>,
     @InjectRepository(RoadmapConfig)
     private readonly roadmapConfigRepo: Repository<RoadmapConfig>,
+    @InjectRepository(JiraFieldConfig)
+    private readonly jiraFieldConfigRepo: Repository<JiraFieldConfig>,
     private readonly configService: ConfigService,
   ) {}
 
@@ -118,7 +122,7 @@ export class YamlConfigService implements OnApplicationBootstrap {
       throw new Error(`boards.yaml validation failed:\n${details}`);
     }
 
-    const { boards } = result.data;
+    const { boards, jira } = result.data;
     let applied = 0;
 
     for (const board of boards) {
@@ -177,6 +181,40 @@ export class YamlConfigService implements OnApplicationBootstrap {
 
     this.seedStatus.boardsApplied = applied;
     this.logger.log(`YAML config: ${applied} board config(s) applied from boards.yaml`);
+
+    // Apply jira: stanza if present — only write fields that are explicitly
+    // specified so that a partial stanza does not wipe out other fields.
+    if (jira !== undefined) {
+      await this.applyJiraStanza(jira);
+    }
+  }
+
+  /**
+   * Upsert the singleton JiraFieldConfig row from the `jira:` stanza.
+   * Only fields explicitly set in YAML are written; all others keep their
+   * current DB values (or migration defaults if the row is brand-new).
+   */
+  private async applyJiraStanza(
+    jira: NonNullable<ReturnType<typeof BoardsYamlFileSchema.parse>['jira']>,
+  ): Promise<void> {
+    const payload: Partial<JiraFieldConfig> & Pick<JiraFieldConfig, 'id'> = { id: 1 };
+
+    if (jira.storyPointsFieldIds !== undefined) {
+      payload.storyPointsFieldIds = jira.storyPointsFieldIds;
+    }
+    if (jira.epicLinkFieldId !== undefined) {
+      payload.epicLinkFieldId = jira.epicLinkFieldId;
+    }
+    if (jira.jpdDeliveryLinkInward !== undefined) {
+      payload.jpdDeliveryLinkInward = jira.jpdDeliveryLinkInward;
+    }
+    if (jira.jpdDeliveryLinkOutward !== undefined) {
+      payload.jpdDeliveryLinkOutward = jira.jpdDeliveryLinkOutward;
+    }
+
+    await this.jiraFieldConfigRepo.upsert(payload, { conflictPaths: ['id'] });
+    this.seedStatus.jiraFieldConfigApplied = true;
+    this.logger.log('YAML config: jira field config applied from boards.yaml jira: stanza');
   }
 
   private async applyRoadmapYaml(): Promise<void> {

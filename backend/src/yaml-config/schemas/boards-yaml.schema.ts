@@ -1,5 +1,40 @@
 import { z } from 'zod';
 
+/**
+ * Accepts either a bare string (coerced to a single-element array) or an
+ * explicit string array.  This allows the common YAML idiom of writing a
+ * scalar value for a single link type name without requiring the operator to
+ * wrap it in a list.
+ */
+const stringOrArray = z.union([
+  z.string().min(1).transform((s) => [s]),
+  z.array(z.string().min(1)),
+]);
+
+/**
+ * Optional tenant-level Jira field configuration.
+ * All fields have defaults that match the previously hardcoded values, so
+ * omitting this stanza entirely leaves behaviour unchanged.
+ */
+export const JiraStanzaSchema = z.object({
+  /** Custom field IDs to probe for story points, tried in priority order. */
+  storyPointsFieldIds: z.array(z.string().min(1)).optional(),
+
+  /**
+   * Custom field ID for the legacy Epic Link field.
+   * Set to null to disable the legacy fallback entirely (next-gen projects only).
+   */
+  epicLinkFieldId: z.string().min(1).nullable().optional(),
+
+  /** Inward link type name substrings for JPD delivery links. */
+  jpdDeliveryLinkInward: stringOrArray.optional(),
+
+  /** Outward link type name substrings for JPD delivery links. */
+  jpdDeliveryLinkOutward: stringOrArray.optional(),
+});
+
+export type JiraStanza = z.infer<typeof JiraStanzaSchema>;
+
 const BoardYamlSchema = z.object({
   boardId: z.string().min(1).toUpperCase(),
   // boardType is optional — omitting it leaves the existing DB value untouched.
@@ -30,6 +65,7 @@ const BoardYamlSchema = z.object({
 export const BoardsYamlFileSchema = z
   .object({
     boards: z.array(BoardYamlSchema),
+    jira: JiraStanzaSchema.optional(),
   })
   .superRefine((data, ctx) => {
     const seen = new Set<string>();

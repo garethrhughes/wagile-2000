@@ -149,8 +149,8 @@ Or use the provided Docker Compose file:
 docker compose up -d
 ```
 
-> **Note:** `docker-compose.yml` defaults to the database name `ai_starter`. If you want to use
-> a different name (e.g. `fragile`), edit both `docker-compose.yml` (the `POSTGRES_DB`
+> **Note:** `docker-compose.yml` defaults to the database name `fragile`. If you want to use
+> a different name, edit both `docker-compose.yml` (the `POSTGRES_DB`
 > environment variable) and `DB_DATABASE` in `backend/.env` to match.
 
 ### 3. Configure the backend
@@ -380,7 +380,7 @@ minute or two depending on the number of issues and boards. Subsequent syncs are
 | `DB_PORT` | No | `5432` | PostgreSQL port |
 | `DB_USERNAME` | No | `postgres` | PostgreSQL username |
 | `DB_PASSWORD` | No | `postgres` | PostgreSQL password |
-| `DB_DATABASE` | No | `ai_starter` | PostgreSQL database name (must match `docker-compose.yml`) |
+| `DB_DATABASE` | No | `fragile` | PostgreSQL database name (must match `docker-compose.yml`) |
 | `PORT` | No | `3001` | Port the NestJS server listens on |
 | `FRONTEND_URL` | No | `http://localhost:3000` | Allowed CORS origin for the frontend |
 | `TIMEZONE` | No | `UTC` | IANA timezone string used for quarter/week boundary calculations, e.g. `America/New_York` |
@@ -454,14 +454,18 @@ differ between Jira tenants and must be configured manually:
 ### Roadmap accuracy: delivery issue links
 
 For an issue to count as roadmap-covered, it must be linked to an Epic that is in turn linked to
-a JPD idea via a delivery issue link. Fragile recognises the following link type names by default:
+a JPD idea via a delivery issue link. The default delivery link type names recognised by Fragile
+are:
 
-- `is implemented by` / `implements`
 - `is delivered by` / `delivers`
 
 These link types are created automatically when you connect Jira Software delivery tickets to JPD
-ideas using the native **Delivery** panel in JPD. No custom configuration is required for the
-link types themselves.
+ideas using the native **Delivery** panel in JPD.
+
+If your Jira instance uses different delivery link type names (e.g. `is implemented by` /
+`implements`), update `jpdDeliveryLinkInward` and `jpdDeliveryLinkOutward` in the `jira:` stanza
+of `backend/config/boards.yaml` (see [`jira:` stanza](#backendconfigboardsyaml--jira-stanza-optional-top-level))
+or set the values through the Settings UI.
 
 ---
 
@@ -611,6 +615,44 @@ boards:
                                   #   Default: null
 ```
 
+### `backend/config/boards.yaml` — `jira:` stanza (optional, top-level)
+
+In addition to the `boards:` list, `boards.yaml` accepts an optional top-level `jira:` key that
+controls which Jira custom field IDs are used for story points and JPD delivery link types. All
+fields inside the stanza are optional — any field omitted keeps its current database value.
+
+```yaml
+jira:
+  # Story point field IDs — Fragile tries each in order and uses the first non-null value found.
+  # List all field ID variants present in your Jira instance.
+  # Default: all five IDs below.
+  storyPointsFieldIds:
+    - story_points          # legacy Jira Server / some older cloud projects
+    - customfield_10016     # "Story point estimate" (classic projects)
+    - customfield_10026     # "Story Points" (classic projects, older)
+    - customfield_10028     # "Story Points" (some cloud instances)
+    - customfield_11031     # "Story point estimate" (team-managed / next-gen)
+
+  # Epic Link custom field — used for legacy epic relationships pre-dating Jira's parent field.
+  # Set to null to disable and rely solely on the native parent field.
+  # Default: "customfield_10014"
+  epicLinkFieldId: customfield_10014
+
+  # JPD delivery link type names — must match exactly what Jira shows on the issue link panel.
+  # Accepts either a bare string or a list. Default: both values shown below.
+  # Check by opening any delivery-linked issue in your Jira instance.
+  jpdDeliveryLinkInward:
+    - "is implemented by"
+    - "is delivered by"
+  jpdDeliveryLinkOutward:
+    - "implements"
+    - "delivers"
+```
+
+These values are stored in the `jira_field_config` table (singleton row, `id = 1`) and loaded once
+per sync. If the `jira:` stanza is absent, the database values — seeded with the defaults above by
+the `AddJiraFieldConfig` migration — are left untouched.
+
 ### `backend/config/roadmap.yaml` — field reference
 
 ```yaml
@@ -678,7 +720,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: ai_starter   # Change this AND DB_DATABASE in backend/.env to match
+      POSTGRES_DB: fragile
     volumes:
       - pgdata:/var/lib/postgresql/data
 
@@ -776,6 +818,7 @@ names in PostgreSQL.
 | Entity | Table | Key fields | Purpose |
 |---|---|---|---|
 | `BoardConfig` | `board_configs` | `boardId` (PK) | Per-board metric rules and status configuration |
+| `JiraFieldConfig` | `jira_field_config` | `id` (PK, always 1) | Singleton row storing tenant-specific Jira custom field IDs for story points and JPD delivery link type names |
 | `JiraIssue` | `jira_issues` | `key` (PK), `boardId`, `sprintId`, `epicKey`, `issueType`, `status`, `statusId`, `points`, `labels`, `createdAt` | Snapshot of each Jira issue |
 | `JiraSprint` | `jira_sprints` | `id` (PK), `boardId`, `state`, `startDate`, `endDate` | Sprint metadata for Scrum boards |
 | `JiraChangelog` | `jira_changelogs` | `id` (PK, auto), `issueKey`, `field`, `fromValue`, `toValue`, `changedAt` | Full field-change history; used for sprint membership reconstruction and cycle time |

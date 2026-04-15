@@ -2,7 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { YamlConfigService } from './yaml-config.service.js';
 import type { FileReader } from './yaml-config.service.js';
-import { BoardConfig, RoadmapConfig } from '../database/entities/index.js';
+import { BoardConfig, RoadmapConfig, JiraFieldConfig } from '../database/entities/index.js';
 
 /** Minimal ConfigService stub — returns undefined for all keys (uses service defaults). */
 const stubConfigService = {
@@ -23,6 +23,12 @@ function mockRoadmapRepo(): jest.Mocked<Pick<Repository<RoadmapConfig>, 'upsert'
   return {
     upsert: jest.fn().mockResolvedValue({ identifiers: [], generatedMaps: [], raw: [] }),
   } as unknown as jest.Mocked<Pick<Repository<RoadmapConfig>, 'upsert'>>;
+}
+
+function mockJiraFieldConfigRepo(): jest.Mocked<Pick<Repository<JiraFieldConfig>, 'upsert'>> {
+  return {
+    upsert: jest.fn().mockResolvedValue({ identifiers: [], generatedMaps: [], raw: [] }),
+  } as unknown as jest.Mocked<Pick<Repository<JiraFieldConfig>, 'upsert'>>;
 }
 
 /**
@@ -52,10 +58,12 @@ function buildService(
   boardRepo: unknown,
   roadmapRepo: unknown,
   fileReader: FileReader = noFilesReader,
+  jiraFieldConfigRepo: unknown = mockJiraFieldConfigRepo(),
 ): YamlConfigService {
   return new YamlConfigService(
     boardRepo as Repository<BoardConfig>,
     roadmapRepo as Repository<RoadmapConfig>,
+    jiraFieldConfigRepo as Repository<JiraFieldConfig>,
     stubConfigService,
   ).withFileReader(fileReader);
 }
@@ -67,10 +75,12 @@ function buildService(
 describe('YamlConfigService', () => {
   let boardRepo: jest.Mocked<Pick<Repository<BoardConfig>, 'upsert'>>;
   let roadmapRepo: jest.Mocked<Pick<Repository<RoadmapConfig>, 'upsert'>>;
+  let jiraFieldConfigRepo: jest.Mocked<Pick<Repository<JiraFieldConfig>, 'upsert'>>;
 
   beforeEach(() => {
     boardRepo = mockBoardRepo();
     roadmapRepo = mockRoadmapRepo();
+    jiraFieldConfigRepo = mockJiraFieldConfigRepo();
   });
 
   // -------------------------------------------------------------------------
@@ -657,6 +667,162 @@ roadmaps:
       const { lastAppliedAt } = service.getLastSeedStatus();
       expect(lastAppliedAt).not.toBeNull();
       expect(() => new Date(lastAppliedAt!).toISOString()).not.toThrow();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // jira: stanza — JiraFieldConfig upsert behaviour
+  // -------------------------------------------------------------------------
+
+  describe('jira: stanza in boards.yaml', () => {
+    const boardsWithJiraStanza = `
+boards:
+  - boardId: ACC
+    boardType: scrum
+
+jira:
+  storyPointsFieldIds:
+    - customfield_10016
+    - customfield_10028
+    - story_points
+  epicLinkFieldId: customfield_10014
+  jpdDeliveryLinkInward: "is delivered by"
+  jpdDeliveryLinkOutward: "delivers"
+`;
+
+    it('upserts JiraFieldConfig when jira: stanza is present', async () => {
+      const service = buildService(
+        boardRepo,
+        roadmapRepo,
+        makeFileReader({ 'boards.yaml': boardsWithJiraStanza }),
+        jiraFieldConfigRepo,
+      );
+
+      await service.onApplicationBootstrap();
+
+      expect(jiraFieldConfigRepo.upsert).toHaveBeenCalledTimes(1);
+    });
+
+    it('upserts singleton row id=1 with correct payload', async () => {
+      const service = buildService(
+        boardRepo,
+        roadmapRepo,
+        makeFileReader({ 'boards.yaml': boardsWithJiraStanza }),
+        jiraFieldConfigRepo,
+      );
+
+      await service.onApplicationBootstrap();
+
+      const call = (jiraFieldConfigRepo.upsert as jest.Mock).mock.calls[0] as [
+        Partial<JiraFieldConfig>,
+        { conflictPaths: string[] },
+      ];
+      expect(call[0].id).toBe(1);
+      expect(call[0].storyPointsFieldIds).toEqual([
+        'customfield_10016',
+        'customfield_10028',
+        'story_points',
+      ]);
+      expect(call[0].epicLinkFieldId).toBe('customfield_10014');
+      expect(call[0].jpdDeliveryLinkInward).toEqual(['is delivered by']);
+      expect(call[0].jpdDeliveryLinkOutward).toEqual(['delivers']);
+      expect(call[1]).toEqual({ conflictPaths: ['id'] });
+    });
+
+    it('sets jiraFieldConfigApplied to true in seed status when stanza is present', async () => {
+      const service = buildService(
+        boardRepo,
+        roadmapRepo,
+        makeFileReader({ 'boards.yaml': boardsWithJiraStanza }),
+        jiraFieldConfigRepo,
+      );
+
+      await service.onApplicationBootstrap();
+
+      expect(service.getLastSeedStatus().jiraFieldConfigApplied).toBe(true);
+    });
+
+    it('does not upsert JiraFieldConfig when jira: stanza is absent', async () => {
+      const service = buildService(
+        boardRepo,
+        roadmapRepo,
+        makeFileReader({
+          'boards.yaml': `
+boards:
+  - boardId: ACC
+    boardType: scrum
+`,
+        }),
+        jiraFieldConfigRepo,
+      );
+
+      await service.onApplicationBootstrap();
+
+      expect(jiraFieldConfigRepo.upsert).not.toHaveBeenCalled();
+    });
+
+    it('leaves jiraFieldConfigApplied false when jira: stanza is absent', async () => {
+      const service = buildService(
+        boardRepo,
+        roadmapRepo,
+        makeFileReader({
+          'boards.yaml': `
+boards:
+  - boardId: ACC
+    boardType: scrum
+`,
+        }),
+        jiraFieldConfigRepo,
+      );
+
+      await service.onApplicationBootstrap();
+
+      expect(service.getLastSeedStatus().jiraFieldConfigApplied).toBe(false);
+    });
+
+    it('upserts partial jira: stanza with only explicitly set fields', async () => {
+      // Only storyPointsFieldIds is set; epicLinkFieldId is absent entirely.
+      const service = buildService(
+        boardRepo,
+        roadmapRepo,
+        makeFileReader({
+          'boards.yaml': `
+boards:
+  - boardId: ACC
+    boardType: scrum
+
+jira:
+  storyPointsFieldIds:
+    - customfield_10016
+`,
+        }),
+        jiraFieldConfigRepo,
+      );
+
+      await service.onApplicationBootstrap();
+
+      const call = (jiraFieldConfigRepo.upsert as jest.Mock).mock.calls[0] as [
+        Partial<JiraFieldConfig>,
+        unknown,
+      ];
+      expect(call[0].storyPointsFieldIds).toEqual(['customfield_10016']);
+      // Absent fields must NOT be present in the payload
+      expect('epicLinkFieldId' in call[0]).toBe(false);
+      expect('jpdDeliveryLinkInward' in call[0]).toBe(false);
+      expect('jpdDeliveryLinkOutward' in call[0]).toBe(false);
+    });
+
+    it('does not upsert JiraFieldConfig when no boards.yaml is present', async () => {
+      const service = buildService(
+        boardRepo,
+        roadmapRepo,
+        noFilesReader,
+        jiraFieldConfigRepo,
+      );
+
+      await service.onApplicationBootstrap();
+
+      expect(jiraFieldConfigRepo.upsert).not.toHaveBeenCalled();
     });
   });
 });

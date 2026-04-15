@@ -77,10 +77,15 @@ export class JiraClientService {
     boardId: string,
     sprintId: string,
     startAt = 0,
+    extraFields: string[] = [],
   ): Promise<JiraIssueSearchResponse> {
+    const baseFields = 'summary,status,issuetype,fixVersions,labels,created,updated,issuelinks,parent,priority,assignee';
+    const fields = extraFields.length > 0
+      ? `${baseFields},${extraFields.join(',')}`
+      : baseFields;
     const url =
       `${this.baseUrl}/rest/agile/1.0/board/${boardId}/sprint/${sprintId}/issue` +
-      `?maxResults=100&startAt=${startAt}&fields=summary,status,issuetype,fixVersions,labels,created,updated,issuelinks,parent,priority,assignee,story_points,customfield_10016,customfield_10026,customfield_10028,customfield_11031` +
+      `?maxResults=100&startAt=${startAt}&fields=${fields}` +
       `&expand=names`;
     return this.fetchWithRetry<JiraIssueSearchResponse>(url);
   }
@@ -105,11 +110,16 @@ export class JiraClientService {
     _startAt = 0,
     maxResults = 100,
     nextPageToken?: string,
+    extraFields: string[] = [],
   ): Promise<JiraIssueSearchResponse> {
+    const baseFields = 'summary,status,issuetype,fixVersions,labels,created,updated,issuelinks,parent,priority,assignee';
+    const fields = extraFields.length > 0
+      ? `${baseFields},${extraFields.join(',')}`
+      : baseFields;
     const params = new URLSearchParams({
       jql,
       maxResults: String(maxResults),
-      fields: 'summary,status,issuetype,fixVersions,labels,created,updated,issuelinks,parent,priority,assignee,story_points,customfield_10016,customfield_10026,customfield_10028,customfield_11031',
+      fields,
     });
     if (nextPageToken) {
       params.set('nextPageToken', nextPageToken);

@@ -48,7 +48,7 @@ resource "aws_db_instance" "main" {
   storage_encrypted = true
 
   # Database
-  db_name  = "ai_starter"
+  db_name  = "fragile"
   username = "postgres"
   password = data.aws_secretsmanager_secret_version.db_password.secret_string
 

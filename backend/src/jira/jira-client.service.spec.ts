@@ -103,11 +103,30 @@ describe('JiraClientService', () => {
       );
     });
 
-    it('includes story point custom fields in the fields param', async () => {
+    it('includes extraFields in the fields param when provided', async () => {
       // Regression test: ACC-44 appeared in "no estimate" because story point
-      // fields were missing from the API request, so they were never returned
-      // by Jira and always stored as null. Verify the URL includes all three
-      // story-point field names so the Jira API returns them.
+      // fields were missing from the API request. Field IDs are now passed by
+      // the caller via extraFields — verify they appear in the outbound URL.
+      const payload = { issues: [], total: 0 };
+      globalFetch.mockImplementation(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => payload,
+      }));
+
+      await service.getSprintIssues('42', '7', 0, [
+        'story_points',
+        'customfield_10016',
+        'customfield_10028',
+      ]);
+
+      const calledUrl: string = globalFetch.mock.calls[0][0] as string;
+      expect(calledUrl).toContain('story_points');
+      expect(calledUrl).toContain('customfield_10016');
+      expect(calledUrl).toContain('customfield_10028');
+    });
+
+    it('omits extra custom fields from the fields param when extraFields is empty', async () => {
       const payload = { issues: [], total: 0 };
       globalFetch.mockImplementation(async () => ({
         status: 200,
@@ -118,9 +137,9 @@ describe('JiraClientService', () => {
       await service.getSprintIssues('42', '7');
 
       const calledUrl: string = globalFetch.mock.calls[0][0] as string;
-      expect(calledUrl).toContain('story_points');
-      expect(calledUrl).toContain('customfield_10016');
-      expect(calledUrl).toContain('customfield_10028');
+      // Without extraFields the URL must not contain story-point field IDs
+      expect(calledUrl).not.toContain('customfield_10016');
+      expect(calledUrl).not.toContain('customfield_10028');
     });
   });
 
@@ -199,9 +218,30 @@ describe('JiraClientService', () => {
       );
     });
 
-    it('includes story point custom fields in the fields param', async () => {
+    it('includes extraFields in the fields param when provided', async () => {
       // Regression test: Kanban issues also had story points missing because
       // searchIssues (used for Kanban sync) lacked the custom field names.
+      // Field IDs are now passed by the caller via extraFields.
+      const payload = { issues: [], total: 0 };
+      globalFetch.mockImplementation(async () => ({
+        status: 200,
+        ok: true,
+        json: async () => payload,
+      }));
+
+      await service.searchIssues('project = ACC', 0, 100, undefined, [
+        'story_points',
+        'customfield_10016',
+        'customfield_10028',
+      ]);
+
+      const calledUrl: string = globalFetch.mock.calls[0][0] as string;
+      expect(calledUrl).toContain('story_points');
+      expect(calledUrl).toContain('customfield_10016');
+      expect(calledUrl).toContain('customfield_10028');
+    });
+
+    it('omits extra custom fields from the fields param when extraFields is empty', async () => {
       const payload = { issues: [], total: 0 };
       globalFetch.mockImplementation(async () => ({
         status: 200,
@@ -212,9 +252,8 @@ describe('JiraClientService', () => {
       await service.searchIssues('project = ACC');
 
       const calledUrl: string = globalFetch.mock.calls[0][0] as string;
-      expect(calledUrl).toContain('story_points');
-      expect(calledUrl).toContain('customfield_10016');
-      expect(calledUrl).toContain('customfield_10028');
+      expect(calledUrl).not.toContain('customfield_10016');
+      expect(calledUrl).not.toContain('customfield_10028');
     });
   });
 

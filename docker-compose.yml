@@ -1,14 +1,14 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: ai-starter-db
+    container_name: fragile-db
     restart: unless-stopped
     ports:
       - "5432:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: ai_starter
+      POSTGRES_DB: fragile
     volumes:
       - pgdata:/var/lib/postgresql/data
 

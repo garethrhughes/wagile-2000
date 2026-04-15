@@ -13,6 +13,7 @@ import {
   RoadmapConfig,
   JpdIdea,
   JiraIssueLink,
+  JiraFieldConfig,
 } from '../database/entities/index.js';
 import { SprintReportModule } from '../sprint-report/sprint-report.module.js';
 
@@ -28,6 +29,7 @@ import { SprintReportModule } from '../sprint-report/sprint-report.module.js';
       RoadmapConfig,
       JpdIdea,
       JiraIssueLink,
+      JiraFieldConfig,
     ]),
     JiraModule,
     forwardRef(() => SprintReportModule),

@@ -13,6 +13,7 @@ import {
   RoadmapConfig,
   JpdIdea,
   JiraIssueLink,
+  JiraFieldConfig,
 } from '../database/entities/index.js';
 import type {
   JiraChangelogEntry,
@@ -20,6 +21,31 @@ import type {
   JiraIssueLink as JiraIssueLinkType,
 } from '../jira/jira.types.js';
 import { SprintReportService } from '../sprint-report/sprint-report.service.js';
+
+/**
+ * Resolved snapshot of JiraFieldConfig used throughout a single sync run.
+ * Loading it once per sync avoids repeated DB reads in hot loops.
+ */
+interface FieldConfig {
+  storyPointsFieldIds: string[];
+  epicLinkFieldId: string | null;
+  jpdDeliveryLinkInward: string[];
+  jpdDeliveryLinkOutward: string[];
+}
+
+/** Fallback values that match the previously hardcoded behaviour. */
+const DEFAULT_FIELD_CONFIG: FieldConfig = {
+  storyPointsFieldIds: [
+    'story_points',
+    'customfield_10016',
+    'customfield_10026',
+    'customfield_10028',
+    'customfield_11031',
+  ],
+  epicLinkFieldId: 'customfield_10014',
+  jpdDeliveryLinkInward: ['is implemented by', 'is delivered by'],
+  jpdDeliveryLinkOutward: ['implements', 'delivers'],
+};
 
 @Injectable()
 export class SyncService {
@@ -47,6 +73,8 @@ export class SyncService {
     private readonly issueLinkRepo: Repository<JiraIssueLink>,
     @Inject(forwardRef(() => SprintReportService))
     private readonly sprintReportService: SprintReportService,
+    @InjectRepository(JiraFieldConfig)
+    private readonly jiraFieldConfigRepo: Repository<JiraFieldConfig>,
   ) {}
 
   @Cron('0 */30 * * * *')
@@ -60,13 +88,16 @@ export class SyncService {
     const boardIds = configs.map((c) => c.boardId);
     const results: SyncLog[] = [];
 
+    // Load field config once for the entire sync run.
+    const fieldConfig = await this.loadFieldConfig();
+
     for (const boardId of boardIds) {
-      const result = await this.syncBoard(boardId);
+      const result = await this.syncBoard(boardId, fieldConfig);
       results.push(result);
     }
 
     try {
-      await this.syncRoadmaps();
+      await this.syncRoadmaps(fieldConfig);
     } catch (error) {
       this.logger.warn(
         `syncRoadmaps failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
@@ -85,12 +116,37 @@ export class SyncService {
     return { boards: boardIds, results };
   }
 
-  async syncBoard(boardId: string): Promise<SyncLog> {
+  /**
+   * Load the singleton JiraFieldConfig row.  Falls back to hardcoded defaults
+   * if the row is somehow absent (should not happen after migration).
+   */
+  private async loadFieldConfig(): Promise<FieldConfig> {
+    const row = await this.jiraFieldConfigRepo.findOne({ where: { id: 1 } });
+    if (!row) {
+      this.logger.warn(
+        'JiraFieldConfig row (id=1) missing — using hardcoded defaults. ' +
+        'This should not happen on a migrated database.',
+      );
+      return { ...DEFAULT_FIELD_CONFIG };
+    }
+    return {
+      storyPointsFieldIds: row.storyPointsFieldIds,
+      epicLinkFieldId: row.epicLinkFieldId,
+      jpdDeliveryLinkInward: row.jpdDeliveryLinkInward,
+      jpdDeliveryLinkOutward: row.jpdDeliveryLinkOutward,
+    };
+  }
+
+  async syncBoard(boardId: string, fieldConfig?: FieldConfig): Promise<SyncLog> {
     const syncLog = this.syncLogRepo.create({
       boardId,
       issueCount: 0,
       status: 'success',
     });
+
+    // Allow callers (e.g. the controller) to trigger a single-board sync
+    // without providing a pre-loaded FieldConfig — load it on demand.
+    const resolvedFieldConfig = fieldConfig ?? await this.loadFieldConfig();
 
     try {
       // Ensure board config exists and get its type
@@ -99,12 +155,15 @@ export class SyncService {
       // Resolve project key to numeric Jira board ID
       const numericBoardId = await this.resolveNumericBoardId(boardId);
 
+      // Build the field list to request from Jira: story points fields + epic link field
+      const extraFields = this.buildExtraFields(resolvedFieldConfig);
+
       let totalIssues = 0;
       const allIssueKeys: string[] = [];
 
       if (config.boardType === 'kanban') {
         // Kanban boards don't have sprints — fetch issues via JQL
-        const issues = await this.syncKanbanIssues(boardId);
+        const issues = await this.syncKanbanIssuesWithConfig(boardId, extraFields, resolvedFieldConfig);
         totalIssues = issues.length;
         allIssueKeys.push(...issues.map((i) => i.key));
         this.logger.log(
@@ -118,7 +177,13 @@ export class SyncService {
         );
 
         for (const sprint of sprints) {
-          const issues = await this.syncSprintIssues(boardId, numericBoardId, sprint.id);
+          const issues = await this.syncSprintIssues(
+            boardId,
+            numericBoardId,
+            sprint.id,
+            extraFields,
+            resolvedFieldConfig,
+          );
           totalIssues += issues.length;
           allIssueKeys.push(...issues.map((i) => i.key));
         }
@@ -144,6 +209,19 @@ export class SyncService {
     }
 
     return this.syncLogRepo.save(syncLog);
+  }
+
+  /**
+   * Build the list of extra Jira fields to request beyond the standard set.
+   * Includes all configured story-points field IDs and the epic link field ID
+   * (when non-null).
+   */
+  private buildExtraFields(fieldConfig: FieldConfig): string[] {
+    const fields = [...fieldConfig.storyPointsFieldIds];
+    if (fieldConfig.epicLinkFieldId !== null) {
+      fields.push(fieldConfig.epicLinkFieldId);
+    }
+    return fields;
   }
 
   private async resolveNumericBoardId(projectKey: string): Promise<string> {
@@ -183,23 +261,25 @@ export class SyncService {
     return this.boardConfigRepo.save(config);
   }
 
-  private async syncKanbanIssues(boardId: string): Promise<JiraIssue[]> {
-    // Fetch recent issues for the Kanban project via JQL
+  private async syncKanbanIssuesWithConfig(
+    boardId: string,
+    extraFields: string[],
+    fieldConfig: FieldConfig,
+  ): Promise<JiraIssue[]> {
     const jql = `project = ${boardId} ORDER BY updated DESC`;
     const allIssues: JiraIssue[] = [];
     const allRawIssues: JiraIssueValue[] = [];
     let nextPageToken: string | undefined;
 
     do {
-      const response = await this.jiraClient.searchIssues(jql, 0, 100, nextPageToken);
+      const response = await this.jiraClient.searchIssues(jql, 0, 100, nextPageToken, extraFields);
 
       const issues = response.issues.map((i) =>
-        this.mapJiraIssue(i, boardId, null),
+        this.mapJiraIssue(i, boardId, null, fieldConfig),
       );
       allIssues.push(...issues);
       allRawIssues.push(...response.issues);
       nextPageToken = response.nextPageToken;
-      // Cap at 1000 issues per Kanban board to avoid excessive API calls
       if (allIssues.length >= 1000) break;
     } while (nextPageToken);
 
@@ -235,6 +315,8 @@ export class SyncService {
     boardId: string,
     numericBoardId: string,
     sprintId: string,
+    extraFields: string[],
+    fieldConfig: FieldConfig,
   ): Promise<JiraIssue[]> {
     const allIssues: JiraIssue[] = [];
     const allRawIssues: JiraIssueValue[] = [];
@@ -246,11 +328,12 @@ export class SyncService {
         numericBoardId,
         sprintId,
         startAt,
+        extraFields,
       );
       total = response.total;
 
       const issues = response.issues.map((i) =>
-        this.mapJiraIssue(i, boardId, sprintId),
+        this.mapJiraIssue(i, boardId, sprintId, fieldConfig),
       );
       allIssues.push(...issues);
       allRawIssues.push(...response.issues);
@@ -269,6 +352,7 @@ export class SyncService {
     raw: JiraIssueValue,
     boardId: string,
     sprintId: string | null,
+    fieldConfig: FieldConfig,
   ): JiraIssue {
     const issue = new JiraIssue();
     issue.key = raw.key;
@@ -287,21 +371,9 @@ export class SyncService {
     issue.sprintId = sprintId;
     issue.createdAt = new Date(raw.fields.created);
 
-    // Attempt to extract story points from common field names.
-    // Different Jira project types use different custom field IDs:
-    //   customfield_10016 — "Story point estimate" (classic projects)
-    //   customfield_10026 — "Story Points" (classic projects, older)
-    //   customfield_10028 — "Story Points" (some cloud instances)
-    //   customfield_11031 — "Story point estimate" (next-gen / team-managed)
-    //   story_points      — legacy Jira Server field name
-    const storyPointFields = [
-      'story_points',
-      'customfield_10016',
-      'customfield_10026',
-      'customfield_10028',
-      'customfield_11031',
-    ];
-    for (const field of storyPointFields) {
+    // Extract story points by iterating the configured field ID list.
+    // The first field that returns a numeric value wins.
+    for (const field of fieldConfig.storyPointsFieldIds) {
       const value = raw.fields[field];
       if (typeof value === 'number') {
         issue.points = value;
@@ -313,12 +385,15 @@ export class SyncService {
     }
 
     // Extract epicKey: prefer modern parent link (only if parent is an Epic),
-    // fall back to legacy customfield_10014 epic link field.
+    // then fall back to the configured legacy epic link field (if non-null).
     const parent = raw.fields.parent;
     if (parent?.fields?.issuetype?.name === 'Epic') {
       issue.epicKey = parent.key;
-    } else if (typeof raw.fields.customfield_10014 === 'string') {
-      issue.epicKey = raw.fields.customfield_10014;
+    } else if (
+      fieldConfig.epicLinkFieldId !== null &&
+      typeof raw.fields[fieldConfig.epicLinkFieldId] === 'string'
+    ) {
+      issue.epicKey = raw.fields[fieldConfig.epicLinkFieldId] as string;
     } else {
       issue.epicKey = null;
     }
@@ -446,11 +521,12 @@ export class SyncService {
     }
   }
 
-  async syncRoadmaps(): Promise<void> {
+  async syncRoadmaps(fieldConfig?: FieldConfig): Promise<void> {
+    const resolvedFieldConfig = fieldConfig ?? await this.loadFieldConfig();
     const configs = await this.roadmapConfigRepo.find();
     for (const cfg of configs) {
       try {
-        await this.syncJpdProject(cfg.jpdKey);
+        await this.syncJpdProject(cfg.jpdKey, resolvedFieldConfig);
       } catch (error) {
         this.logger.warn(
           `Failed to sync JPD project ${cfg.jpdKey}: ${error instanceof Error ? error.message : String(error)}`,
@@ -459,7 +535,7 @@ export class SyncService {
     }
   }
 
-  private async syncJpdProject(jpdKey: string): Promise<void> {
+  private async syncJpdProject(jpdKey: string, fieldConfig: FieldConfig): Promise<void> {
     // Load the roadmap config for this JPD project to get date field IDs
     const config = await this.roadmapConfigRepo.findOne({ where: { jpdKey } });
     const extraFields: string[] = [];
@@ -479,13 +555,10 @@ export class SyncService {
           const inward = link.type.inward.toLowerCase();
           const outward = link.type.outward.toLowerCase();
 
-          // Polaris work item link: idea "is implemented by" an Epic (inward side)
-          // Also handles legacy "is delivered by" / "delivers" naming.
+          // Match delivery links using the configured inward/outward substrings.
           const isDeliveryLink =
-            inward.includes('is implemented by') ||
-            inward.includes('is delivered by') ||
-            outward.includes('implements') ||
-            outward.includes('delivers');
+            fieldConfig.jpdDeliveryLinkInward.some((s) => inward.includes(s.toLowerCase())) ||
+            fieldConfig.jpdDeliveryLinkOutward.some((s) => outward.includes(s.toLowerCase()));
 
           if (isDeliveryLink) {
             if (link.inwardIssue?.fields?.issuetype?.name === 'Epic') {
