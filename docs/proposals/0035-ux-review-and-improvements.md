@@ -25,22 +25,22 @@ found during a systematic review and proposes a prioritised set of improvements.
 ### F-1 — Raw Colour Leakage (Dark Mode Breakage)
 
 The CSS layer in `globals.css` defines a complete semantic token set (surface, border, text
-variants, squirrel scale) and a `.dark` theme override. However, many components bypass this
+variants, and squirrel scale) and a `.dark` theme override. However, many components bypass this
 system and reference raw Tailwind palette utilities directly.
 
 **Affected locations:**
 
 | Location | Problematic class |
 |---|---|
-| `dora/page.tsx` — period toggle | `bg-blue-50 text-blue-700 hover:bg-gray-50` |
-| `cycle-time/page.tsx` — quarter buttons | `border-blue-300 bg-blue-50 text-blue-700 border-border text-muted hover:bg-gray-50` |
-| `cycle-time/page.tsx` — issue type filter | same pattern |
-| `cycle-time/page.tsx` — issues table header | `bg-gray-50` |
-| `roadmap/page.tsx` — board breakdown table | `bg-gray-50` |
-| `settings/page.tsx` — disabled board type field | `bg-gray-50` |
-| `sprint/[boardId]/[sprintId]/page.tsx` — table | `hover:bg-gray-50` |
-| `gaps/page.tsx` — All board chip | `hover:bg-gray-50` |
-| `board-breakdown-table.tsx` — board type badges | `bg-purple-50 text-purple-700 border-purple-200` |
+| `frontend/src/app/dora/page.tsx` — period toggle | `bg-blue-50 text-blue-700 hover:bg-gray-50` |
+| `frontend/src/app/cycle-time/page.tsx` — quarter buttons | `border-blue-300 bg-blue-50 text-blue-700 border-border text-muted hover:bg-gray-50` |
+| `frontend/src/app/cycle-time/page.tsx` — issue type filter | same pattern |
+| `frontend/src/app/cycle-time/page.tsx` — issues table header | `bg-gray-50` |
+| `frontend/src/app/roadmap/page.tsx` — board breakdown table | `bg-gray-50` |
+| `frontend/src/app/settings/page.tsx` — disabled board type field | `bg-gray-50` |
+| `frontend/src/app/sprint/[boardId]/[sprintId]/page.tsx` — table | `hover:bg-gray-50` |
+| `frontend/src/app/gaps/page.tsx` — All board chip | `hover:bg-gray-50` |
+| `frontend/src/components/ui/board-breakdown-table.tsx` — board type badges | `bg-purple-50 text-purple-700 border-purple-200` |
 
 In dark mode, `bg-gray-50` renders as near-white, `bg-blue-50` stays light, and table headers
 become unreadable against dark backgrounds.
