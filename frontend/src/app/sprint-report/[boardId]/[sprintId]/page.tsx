@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import { Loader2, AlertCircle, RefreshCw, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
-import { BackButton } from '@/components/ui/back-button'
 import { Breadcrumb } from '@/components/ui/breadcrumb'
 import {
   ResponsiveContainer,

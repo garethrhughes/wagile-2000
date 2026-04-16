@@ -137,6 +137,9 @@ export default function SettingsPage() {
   const [newBoardType, setNewBoardType] = useState<'scrum' | 'kanban'>('scrum');
   const [boardAdding, setBoardAdding] = useState(false);
 
+  // Two-step inline confirmation for board deletion
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
   // Global store refresh
   const refreshBoards = useBoardsStore((s) => s.refreshBoards);
 
@@ -243,16 +246,8 @@ export default function SettingsPage() {
     }
   }, [newBoardId, newBoardType, show, refreshBoards]);
 
-  // Delete board
+  // Delete board (two-step inline confirmation — no window.confirm)
   const handleDeleteBoard = useCallback(async (id: string) => {
-    if (
-      !window.confirm(
-        `Remove board "${id}"? Synced data is retained but the board will no longer appear in the dashboard.`,
-      )
-    ) {
-      return;
-    }
-
     try {
       await deleteBoard(id);
       const remaining = boardList.filter((b) => b !== id);
@@ -261,6 +256,7 @@ export default function SettingsPage() {
         setActiveBoard(remaining[0] ?? null);
         setConfig(null);
       }
+      setConfirmDeleteId(null);
       show('success', `Board "${id}" removed`);
       void refreshBoards();
     } catch {
@@ -368,17 +364,47 @@ export default function SettingsPage() {
                 tabIndex={0}
               >
                 {id}
-                <button
-                  type="button"
-                  aria-label={`Remove board ${id}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleDeleteBoard(id);
-                  }}
-                  className="ml-0.5 rounded-full p-0.5 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100"
-                >
-                  <X className="h-3 w-3" />
-                </button>
+                {confirmDeleteId === id ? (
+                  /* Step 2: confirm inline */
+                  <span
+                    className="ml-1 inline-flex items-center gap-1"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleDeleteBoard(id);
+                      }}
+                      className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-600 text-white hover:bg-red-700"
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmDeleteId(null);
+                      }}
+                      className="rounded px-1.5 py-0.5 text-xs font-medium bg-card border border-border text-muted hover:text-foreground"
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  /* Step 1: first click asks for confirmation */
+                  <button
+                    type="button"
+                    aria-label={`Remove board ${id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmDeleteId(id);
+                    }}
+                    className="ml-0.5 rounded-full p-0.5 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -391,7 +417,8 @@ export default function SettingsPage() {
         )}
 
         {!configLoading && config && (
-          <div className="space-y-4">
+          <div className="space-y-6">
+            {/* Board-level read-only fields */}
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="mb-1.5 block text-sm font-medium">
@@ -401,7 +428,7 @@ export default function SettingsPage() {
                   type="text"
                   value={config.boardType}
                   disabled
-                  className="w-full rounded-lg border border-border bg-gray-50 px-3 py-2 text-sm text-muted"
+                  className="w-full rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm text-muted"
                 />
               </div>
               <div>
@@ -420,51 +447,87 @@ export default function SettingsPage() {
                   Issues with a board-entry date before this date are excluded from all Kanban metrics. Leave blank for no lower bound.
                 </p>
               </div>
-              <CsvField
-                label="Done Status Names"
-                value={config.doneStatusNames}
-                onChange={(v) => updateField('doneStatusNames', v)}
-              />
-              <CsvField
-                label="In-Progress Status Names"
-                value={config.inProgressStatusNames}
-                onChange={(v) => updateField('inProgressStatusNames', v)}
-              />
-              <CsvField
-                label="Cancelled Status Names"
-                value={config.cancelledStatusNames}
-                onChange={(v) => updateField('cancelledStatusNames', v)}
-              />
-              <CsvField
-                label="Failure Issue Types"
-                value={config.failureIssueTypes}
-                onChange={(v) => updateField('failureIssueTypes', v)}
-              />
-              <CsvField
-                label="Failure Labels"
-                value={config.failureLabels}
-                onChange={(v) => updateField('failureLabels', v)}
-              />
-              <CsvField
-                label="Failure Link Types"
-                value={config.failureLinkTypes}
-                onChange={(v) => updateField('failureLinkTypes', v)}
-              />
-              <CsvField
-                label="Incident Issue Types"
-                value={config.incidentIssueTypes}
-                onChange={(v) => updateField('incidentIssueTypes', v)}
-              />
-              <CsvField
-                label="Recovery Status Names"
-                value={config.recoveryStatusNames}
-                onChange={(v) => updateField('recoveryStatusNames', v)}
-              />
-              <CsvField
-                label="Incident Labels"
-                value={config.incidentLabels}
-                onChange={(v) => updateField('incidentLabels', v)}
-              />
+            </div>
+
+            {/* ── Workflow Statuses ─────────────────────────────────────── */}
+            <div className="rounded-lg border border-border bg-background p-4 space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Workflow Statuses</h3>
+                <p className="mt-0.5 text-xs text-muted">
+                  Status names that map to each lifecycle stage, used to classify issues across all metrics.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <CsvField
+                  label="Done Status Names"
+                  value={config.doneStatusNames}
+                  onChange={(v) => updateField('doneStatusNames', v)}
+                />
+                <CsvField
+                  label="In-Progress Status Names"
+                  value={config.inProgressStatusNames}
+                  onChange={(v) => updateField('inProgressStatusNames', v)}
+                />
+                <CsvField
+                  label="Cancelled Status Names"
+                  value={config.cancelledStatusNames}
+                  onChange={(v) => updateField('cancelledStatusNames', v)}
+                />
+              </div>
+            </div>
+
+            {/* ── CFR Detection ─────────────────────────────────────────── */}
+            <div className="rounded-lg border border-border bg-background p-4 space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">CFR Detection</h3>
+                <p className="mt-0.5 text-xs text-muted">
+                  Criteria used to identify issues that represent failed deployments when calculating Change Failure Rate.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <CsvField
+                  label="Failure Issue Types"
+                  value={config.failureIssueTypes}
+                  onChange={(v) => updateField('failureIssueTypes', v)}
+                />
+                <CsvField
+                  label="Failure Labels"
+                  value={config.failureLabels}
+                  onChange={(v) => updateField('failureLabels', v)}
+                />
+                <CsvField
+                  label="Failure Link Types"
+                  value={config.failureLinkTypes}
+                  onChange={(v) => updateField('failureLinkTypes', v)}
+                />
+              </div>
+            </div>
+
+            {/* ── MTTR Detection ────────────────────────────────────────── */}
+            <div className="rounded-lg border border-border bg-background p-4 space-y-4">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">MTTR Detection</h3>
+                <p className="mt-0.5 text-xs text-muted">
+                  Criteria used to identify incidents and determine when they are resolved when calculating Mean Time to Recovery.
+                </p>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <CsvField
+                  label="Incident Issue Types"
+                  value={config.incidentIssueTypes}
+                  onChange={(v) => updateField('incidentIssueTypes', v)}
+                />
+                <CsvField
+                  label="Recovery Status Names"
+                  value={config.recoveryStatusNames}
+                  onChange={(v) => updateField('recoveryStatusNames', v)}
+                />
+                <CsvField
+                  label="Incident Labels"
+                  value={config.incidentLabels}
+                  onChange={(v) => updateField('incidentLabels', v)}
+                />
+              </div>
             </div>
 
             <div className="flex justify-end pt-2">
@@ -498,9 +561,12 @@ export default function SettingsPage() {
         )}
       </section>
 
-      {/* Roadmap Config (JPD) section */}
+      {/* Roadmap Config (Jira Product Discovery) section */}
       <section className="rounded-xl border border-border bg-card p-6">
-        <h2 className="mb-4 text-lg font-semibold">Roadmap Config (JPD)</h2>
+        <h2 className="mb-1 text-lg font-semibold">Roadmap Config (Jira Product Discovery)</h2>
+        <p className="mb-4 text-sm text-muted">
+          Jira Product Discovery (JPD) boards hold your roadmap items. Configure them here to measure roadmap coverage accuracy.
+        </p>
 
         {jpdConfigsLoading && (
           <div className="flex items-center justify-center py-8">

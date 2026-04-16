@@ -456,14 +456,8 @@ function rowClassName(row: SprintDetailIssue): string {
 }
 
 // ---------------------------------------------------------------------------
-// Back label helper
+// Back navigation helpers
 // ---------------------------------------------------------------------------
-
-function getBackLabel(from: string | null): string {
-  if (from === 'planning') return 'Planning'
-  if (from === 'roadmap') return 'Roadmap'
-  return 'Planning'
-}
 
 function getBackFallback(from: string | null): string {
   if (from === 'roadmap') return '/roadmap'
@@ -536,7 +530,6 @@ export default function SprintDetailPage() {
 
   const columns = useMemo(() => buildColumns(), [])
 
-  const backLabel = getBackLabel(from)
   const backFallback = getBackFallback(from)
 
   const breadcrumbSegments = [

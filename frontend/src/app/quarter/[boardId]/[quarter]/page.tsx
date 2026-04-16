@@ -207,12 +207,6 @@ function rowClassName(row: QuarterDetailIssue): string {
 // Back label helper
 // ---------------------------------------------------------------------------
 
-function getBackLabel(from: string | null): string {
-  if (from === 'roadmap') return 'Back to Roadmap'
-  if (from === 'planning') return 'Planning'
-  return 'Back to Roadmap'
-}
-
 function getBackFallback(from: string | null): string {
   if (from === 'planning') return '/planning'
   return '/roadmap'
@@ -245,6 +239,11 @@ export default function QuarterDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
+  const [retryKey, setRetryKey] = useState(0)
+
+  const reload = useCallback(() => {
+    setRetryKey((k) => k + 1)
+  }, [])
 
   useEffect(() => {
     if (!boardId || !quarter) return
@@ -281,14 +280,7 @@ export default function QuarterDetailPage() {
 
   const columns = useMemo(() => buildColumns(), [])
 
-  const backLabel = getBackLabel(from)
   const backFallback = getBackFallback(from)
-
-  const [retryKey, setRetryKey] = useState(0)
-
-  const reload = useCallback(() => {
-    setRetryKey((k) => k + 1)
-  }, [])
 
   // ── Loading ──────────────────────────────────────────────────────────────
   if (loading) {

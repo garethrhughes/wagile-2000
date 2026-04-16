@@ -228,12 +228,6 @@ function rowClassName(row: WeekDetailIssue): string {
 // Back navigation helpers
 // ---------------------------------------------------------------------------
 
-function getBackLabel(from: string | null): string {
-  if (from === 'roadmap') return 'Back to Roadmap'
-  if (from === 'planning') return 'Planning'
-  return 'Planning'
-}
-
 function getBackFallback(from: string | null): string {
   if (from === 'roadmap') return '/roadmap'
   return '/planning'
@@ -255,6 +249,11 @@ export default function WeekDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notFound, setNotFound] = useState(false)
+  const [retryKey, setRetryKey] = useState(0)
+
+  const reload = useCallback(() => {
+    setRetryKey((k) => k + 1)
+  }, [])
 
   useEffect(() => {
     if (!boardId || !week) return
@@ -291,14 +290,7 @@ export default function WeekDetailPage() {
 
   const columns = useMemo(() => buildColumns(), [])
 
-  const backLabel = getBackLabel(from)
   const backFallback = getBackFallback(from)
-
-  const [retryKey, setRetryKey] = useState(0)
-
-  const reload = useCallback(() => {
-    setRetryKey((k) => k + 1)
-  }, [])
 
   // ── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
