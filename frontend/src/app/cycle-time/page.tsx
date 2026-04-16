@@ -35,7 +35,7 @@ const PAGE_SIZE = 50
 const CYCLE_TIME_HELP: MetricDefinition[] = [
   {
     name: 'Cycle Time',
-    description: 'Time from when work started (first transition to In Progress) to when it was done (transition to Done). Pre-work queue time (before In Progress) is excluded.',
+    description: 'Time from when work started (first transition to In Progress) to when it was done (transition to Done). Pre-work queue time is excluded. Weekends are excluded by default — values are in working days. Epics and Sub-tasks are not included.',
   },
   {
     name: 'P50 (Median)',

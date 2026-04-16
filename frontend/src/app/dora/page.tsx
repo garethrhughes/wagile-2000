@@ -166,13 +166,13 @@ const DORA_HELP: MetricDefinition[] = [
   },
   {
     name: 'Lead Time for Changes',
-    description: 'Median time from issue creation to first transition to a done/released status. When a fix version is present, the version release date is used as the endpoint.',
+    description: 'Median time from issue creation to first transition to a done/released status. When a fix version is present, the version release date is used as the endpoint. Weekends are excluded by default — values are in working days. Epics and Sub-tasks are excluded.',
     formula: 'median(doneDate − createdAt) across issues in period',
     bands: [
-      { label: 'Elite', threshold: 'Less than 1 day' },
-      { label: 'High', threshold: '1 day – 1 week' },
-      { label: 'Medium', threshold: '1 week – 1 month' },
-      { label: 'Low', threshold: 'More than 1 month' },
+      { label: 'Elite', threshold: 'Less than 1 working day' },
+      { label: 'High', threshold: '1 working day – 1 working week' },
+      { label: 'Medium', threshold: '1 working week – 1 working month' },
+      { label: 'Low', threshold: 'More than 1 working month' },
     ],
   },
   {
@@ -188,7 +188,7 @@ const DORA_HELP: MetricDefinition[] = [
   },
   {
     name: 'Mean Time to Recovery',
-    description: 'Median time to recover from a failure. Measured from incident creation to transition to the configured recovery status.',
+    description: 'Median time to recover from a failure. Measured from incident creation to transition to the configured recovery status. Uses calendar hours (weekends are included) — production incidents are not bounded by working hours.',
     formula: 'median(recoveryDate − failureCreatedAt) across incidents',
     bands: [
       { label: 'Elite', threshold: 'Less than 1 hour' },

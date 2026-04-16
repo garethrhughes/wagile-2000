@@ -56,7 +56,7 @@ const SPRINT_REPORT_HELP: MetricDefinition[] = [
   },
   {
     name: 'Lead Time',
-    description: 'Median days from issue creation to Done for issues completed in this sprint.',
+    description: 'Median working days from issue creation to Done for issues completed in this sprint. Weekends are excluded.',
   },
   {
     name: 'Deployment Frequency',
@@ -69,7 +69,7 @@ const SPRINT_REPORT_HELP: MetricDefinition[] = [
   },
   {
     name: 'MTTR',
-    description: 'Median time to recover from failures that occurred during the sprint.',
+    description: 'Median calendar hours to recover from failures that occurred during the sprint. Weekends are included — production incidents are not bounded by working hours.',
   },
 ]
 
