@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { AlertTriangle } from 'lucide-react'
 import { useReplaceParams } from '@/hooks/use-page-params'
+import { useDebounce } from '@/hooks/use-debounce'
 import {
   ResponsiveContainer,
   LineChart,
@@ -233,6 +234,10 @@ function DoraPageInner() {
   const [pageState, setPageState] = useState<PageState>({ status: 'idle' })
   const [retryKey, setRetryKey] = useState(0)
 
+  // Debounce board selection so rapid multi-board toggles don't fire a fetch
+  // for every intermediate state. Chips update immediately; fetch waits 400 ms.
+  const debouncedBoards = useDebounce(selectedBoards, 400)
+
   const reload = useCallback(() => {
     setRetryKey((k) => k + 1)
   }, [])
@@ -268,12 +273,12 @@ function DoraPageInner() {
   useEffect(() => {
     let cancelled = false
     const run = async (): Promise<void> => {
-      if (selectedBoards.length === 0) {
+      if (debouncedBoards.length === 0) {
         setPageState({ status: 'idle' })
         return
       }
       setPageState({ status: 'loading' })
-      const boardId = selectedBoards.join(',')
+      const boardId = debouncedBoards.join(',')
       try {
         // Fetch trend first so we can align the aggregate window to the rightmost
         // chart point using the server's timezone, not the browser's local date.
@@ -306,7 +311,7 @@ function DoraPageInner() {
     return () => {
       cancelled = true
     }
-  }, [selectedBoards, periodType, retryKey])
+  }, [debouncedBoards, periodType, retryKey])
 
   // RC-5: extract sparklines from TrendPoint[] per metric
   const dfSparkline = useMemo(
