@@ -74,15 +74,6 @@ export class DoraCacheService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Build a deterministic cache key from an arbitrary params object.
-   *
-   * Keys are sorted alphabetically before serialisation so that
-   * `{ a: '1', b: '2' }` and `{ b: '2', a: '1' }` produce the same key.
-   *
-   * @param params  - Query parameters (all values will be stringified)
-   * @param namespace - Optional prefix to namespace keys by caller
-   */
-  /**
    * Returns true if the given quarter label's end date is in the past,
    * meaning the data for that quarter is immutable and can be cached for longer.
    *
@@ -101,6 +92,15 @@ export class DoraCacheService {
     }
   }
 
+  /**
+   * Build a deterministic cache key from an arbitrary params object.
+   *
+   * Keys are sorted alphabetically before serialisation so that
+   * `{ a: '1', b: '2' }` and `{ b: '2', a: '1' }` produce the same key.
+   *
+   * @param params  - Query parameters (all values will be stringified)
+   * @param namespace - Optional prefix to namespace keys by caller
+   */
   static buildKey(
     params: Record<string, string | number | boolean | undefined | null>,
     namespace?: string,

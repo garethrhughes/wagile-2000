@@ -437,6 +437,30 @@ describe('MetricsService', () => {
       expect(points[0].label).toBe('Sprint 1'); // oldest first after reverse
     });
 
+    it('sprint mode loads data only for the single requested board, not all resolved boards', async () => {
+      sprintRepo.find.mockResolvedValue([
+        {
+          id: 's1',
+          boardId: 'ACC',
+          name: 'Sprint 1',
+          state: 'closed',
+          startDate: new Date('2026-01-01T00:00:00Z'),
+          endDate: new Date('2026-01-14T00:00:00Z'),
+        } as unknown as JiraSprint,
+      ]);
+      // Even if boardConfigRepo returns multiple boards, sprint mode must only
+      // load data for the single board whose sprints were fetched.
+      boardConfigRepo.find.mockResolvedValue([
+        { boardId: 'ACC' } as BoardConfig,
+        { boardId: 'BPT' } as BoardConfig,
+      ]);
+
+      await service.getDoraTrend({ boardId: 'ACC', mode: 'sprints', limit: 1 });
+
+      const loadCalls = trendDataLoader.load.mock.calls;
+      expect(loadCalls.every(([bid]) => bid === 'ACC')).toBe(true);
+    });
+
     it('throws BadRequestException in sprint mode without boardId', async () => {
       await expect(
         service.getDoraTrend({ mode: 'sprints', limit: 4 }),

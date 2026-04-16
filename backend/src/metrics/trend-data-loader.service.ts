@@ -10,10 +10,17 @@
  * calculations entirely in memory — without re-querying the DB per period.
  *
  * Query budget per board:
- *   1. Issues (boardId)
- *   2. Status changelogs (issueKeys IN, changedAt >= rangeStart)
+ *   1. Issues (boardId) — no date filter; see note below
+ *   2. Status changelogs (issueKeys IN, changedAt BETWEEN rangeStart and rangeEnd)
  *   3. Released versions (projectKey, releaseDate BETWEEN)
  *   4. Issue links (sourceIssueKey IN)
+ *
+ * Note on issue date filter: Issues are loaded without a date constraint
+ * because Lead Time and MTTR need to find issues that may have been created
+ * before the trend window but whose in-progress transitions and done/recovery
+ * transitions fall within it.  Filtering by createdAt or updatedAt would
+ * silently exclude those issues and produce incorrect (low) medians.  The
+ * extra rows are cheap to transfer compared to the changelogs they would bring.
  *
  * Compared to the previous per-period path (≈9 queries × boards × periods),
  * a trend with 8 quarters and 5 boards drops from ~360 to ~20 queries.
@@ -49,7 +56,14 @@ export interface TrendDataSlice {
   wtEntity: WorkingTimeConfigEntity;
   /** All work items for the board (Epics and Sub-tasks excluded). */
   issues: JiraIssue[];
-  /** Status changelogs for work items, changedAt >= rangeStart. */
+  /**
+   * Status changelogs for work items with changedAt BETWEEN rangeStart and
+   * rangeEnd, ordered ascending by changedAt.
+   *
+   * **Ordering contract**: all callers that iterate this array to find "first"
+   * or "last" transitions (e.g. getMttrObservationsFromData) rely on ascending
+   * order.  Do not pass unsorted arrays.
+   */
   changelogs: JiraChangelog[];
   /** Released versions with releaseDate BETWEEN rangeStart and rangeEnd. */
   versions: JiraVersion[];
@@ -103,11 +117,13 @@ export class TrendDataLoader {
         .createQueryBuilder('cl')
         .where('cl.issueKey IN (:...keys)', { keys: issueKeys })
         .andWhere('cl.field = :field', { field: 'status' })
-        // Lower bound is rangeStart (the full trend span start), NOT a per-period
-        // startDate.  Lead Time and MTTR need pre-period changelogs to find
-        // in-progress transitions for issues already in-flight when a period opens.
-        // DF and CFR only need within-period events and tolerate this bound.
+        // Bound changelogs to the trend span to avoid loading transitions that
+        // pre-date the earliest period (lower bound) or post-date the latest
+        // period (upper bound).  Lead Time and MTTR in-memory paths need
+        // pre-period in-progress transitions only within the full span, not
+        // from unbounded history.
         .andWhere('cl.changedAt >= :from', { from: rangeStart })
+        .andWhere('cl.changedAt <= :to', { to: rangeEnd })
         .orderBy('cl.changedAt', 'ASC')
         .getMany(),
       this.versionRepo.find({

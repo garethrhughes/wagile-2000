@@ -2,10 +2,10 @@
  * trend-data-loader.service.spec.ts
  *
  * Verifies that TrendDataLoader.load() fires exactly the right queries
- * (one bulk issues load, one bulk changelog load with changedAt >= rangeStart,
- * one versions load, one issue-links load) and returns a correctly shaped
- * TrendDataSlice.  All DB calls must be mock-intercepted so no real DB is
- * required.
+ * (one bulk issues load, one bulk changelog load with changedAt BETWEEN
+ * rangeStart and rangeEnd, one versions load, one issue-links load) and
+ * returns a correctly shaped TrendDataSlice.  All DB calls must be
+ * mock-intercepted so no real DB is required.
  */
 
 import { Repository, In, Between } from 'typeorm';
@@ -120,7 +120,7 @@ describe('TrendDataLoader', () => {
     );
   });
 
-  it('queries changelogs with changedAt >= rangeStart (lower bound)', async () => {
+  it('queries changelogs with changedAt BETWEEN rangeStart and rangeEnd (lower and upper bounds)', async () => {
     issueRepo.find.mockResolvedValue([
       { key: 'ACC-1', boardId: 'ACC', issueType: 'Story' },
     ] as unknown as JiraIssue[]);
@@ -136,11 +136,14 @@ describe('TrendDataLoader', () => {
 
     await loader.load('ACC', rangeStart, rangeEnd);
 
-    const changedAtCall = andWhere.mock.calls.find(
+    const changedAtCalls = andWhere.mock.calls.filter(
       (args) => typeof args[0] === 'string' && args[0].includes('changedAt'),
     );
-    expect(changedAtCall).toBeDefined();
-    expect(changedAtCall?.[1]).toMatchObject({ from: rangeStart });
+    expect(changedAtCalls.length).toBe(2);
+    // Lower bound
+    expect(changedAtCalls[0]?.[1]).toMatchObject({ from: rangeStart });
+    // Upper bound
+    expect(changedAtCalls[1]?.[1]).toMatchObject({ to: rangeEnd });
   });
 
   it('queries versions with releaseDate Between rangeStart and rangeEnd', async () => {

@@ -327,9 +327,12 @@ export class MetricsService {
       const rangeStart = sprints[sprints.length - 1].startDate as Date;
       const rangeEnd   = sprints[0].endDate as Date;
 
-      // Load data once per board for the full span
+      // Sprint trend is always single-board: load data only for the board whose
+      // sprints were fetched.  Using the full resolved boardIds list here would
+      // mix multi-board data into an org aggregate while the sprint list itself
+      // is scoped to a single board, producing incorrect trend results.
       const slices = await Promise.all(
-        boardIds.map((bid) => this.trendDataLoader.load(bid, rangeStart, rangeEnd)),
+        [boardId].map((bid) => this.trendDataLoader.load(bid, rangeStart, rangeEnd)),
       );
 
       const points = sprints.map((sprint): TrendPoint => {
