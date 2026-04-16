@@ -400,7 +400,7 @@ export default function SettingsPage() {
                       e.stopPropagation();
                       setConfirmDeleteId(id);
                     }}
-                    className="ml-0.5 rounded-full p-0.5 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100"
+                    className="ml-0.5 rounded-full p-0.5 opacity-0 transition-opacity hover:bg-red-100 hover:text-red-600 group-hover:opacity-100 focus:opacity-100"
                   >
                     <X className="h-3 w-3" />
                   </button>

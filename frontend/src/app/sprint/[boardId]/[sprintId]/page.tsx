@@ -533,8 +533,8 @@ export default function SprintDetailPage() {
   const backFallback = getBackFallback(from)
 
   const breadcrumbSegments = [
-    { label: 'Planning', href: '/planning' },
-    { label: boardId, href: `/planning?board=${boardId}` },
+    { label: from === 'roadmap' ? 'Roadmap' : 'Planning', href: backFallback },
+    { label: boardId, href: from === 'roadmap' ? backFallback : `/planning?board=${boardId}` },
     { label: data?.sprintName ?? sprintId },
   ]
 
@@ -551,7 +551,7 @@ export default function SprintDetailPage() {
   if (notFound) {
     return (
       <div className="space-y-4">
-        <Breadcrumb segments={[{ label: 'Planning', href: backFallback }, { label: boardId }]} />
+        <Breadcrumb segments={[{ label: from === 'roadmap' ? 'Roadmap' : 'Planning', href: backFallback }, { label: boardId }]} />
         <EmptyState
           title="Sprint not found"
           message={`Sprint "${sprintId}" was not found on board "${boardId}".`}
@@ -564,7 +564,7 @@ export default function SprintDetailPage() {
   if (isKanban) {
     return (
       <div className="space-y-4">
-        <Breadcrumb segments={[{ label: 'Planning', href: backFallback }, { label: boardId }]} />
+        <Breadcrumb segments={[{ label: from === 'roadmap' ? 'Roadmap' : 'Planning', href: backFallback }, { label: boardId }]} />
         <EmptyState
           title="Kanban board"
           message="Sprint detail view is not available for Kanban boards."
@@ -577,7 +577,7 @@ export default function SprintDetailPage() {
   if (error) {
     return (
       <div className="space-y-4">
-        <Breadcrumb segments={[{ label: 'Planning', href: backFallback }, { label: boardId }]} />
+        <Breadcrumb segments={[{ label: from === 'roadmap' ? 'Roadmap' : 'Planning', href: backFallback }, { label: boardId }]} />
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
           <div className="flex items-start gap-3">
             <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500" />
@@ -614,7 +614,7 @@ export default function SprintDetailPage() {
   if (!data) {
     return (
       <div className="space-y-4">
-        <Breadcrumb segments={[{ label: 'Planning', href: backFallback }, { label: boardId }]} />
+        <Breadcrumb segments={[{ label: from === 'roadmap' ? 'Roadmap' : 'Planning', href: backFallback }, { label: boardId }]} />
         <EmptyState title="No data" message="No sprint data available." />
       </div>
     )

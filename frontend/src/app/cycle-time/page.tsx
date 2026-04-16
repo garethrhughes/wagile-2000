@@ -96,7 +96,12 @@ function CycleTimePageInner() {
 
   const [quarters, setQuarters] = useState<QuarterInfo[]>([])
   const [pageState, setPageState] = useState<PageState>({ status: 'idle' })
+  const [retryKey, setRetryKey] = useState(0)
   const [excludeWeekends, setExcludeWeekends] = useState(true)
+
+  const reload = useCallback(() => {
+    setRetryKey((k) => k + 1)
+  }, [])
   const [tablePage, setTablePage] = useState(0)
 
   // Fetch app config (timezone, excludeWeekends) once on mount
@@ -128,35 +133,7 @@ function CycleTimePageInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Main data fetch — fires on filter change
-  const loadData = useCallback(async (): Promise<void> => {
-    if (boardsStatus !== 'ready') return
-    if (!selectedQuarter) return
-    setPageState({ status: 'loading' })
-
-    try {
-      const [results, trend] = await Promise.all([
-        getCycleTime({
-          boardId: selectedBoard,
-          quarter: selectedQuarter,
-          issueType: issueTypeFilter || undefined,
-        }),
-        getCycleTimeTrend({
-          boardId: selectedBoard,
-          mode: 'quarters',
-          limit: 8,
-          issueType: issueTypeFilter || undefined,
-        }),
-      ])
-      setPageState({ status: 'ready', results, trend })
-    } catch (err: unknown) {
-      setPageState({
-        status: 'error',
-        message: err instanceof Error ? err.message : 'Failed to load cycle time data',
-      })
-    }
-  }, [selectedBoard, selectedQuarter, issueTypeFilter, boardsStatus])
-
+  // Main data fetch — fires on filter change or retry
   useEffect(() => {
     let cancelled = false
     if (boardsStatus !== 'ready' || !selectedQuarter) return
@@ -193,7 +170,7 @@ function CycleTimePageInner() {
     return () => {
       cancelled = true
     }
-  }, [selectedBoard, selectedQuarter, issueTypeFilter, boardsStatus])
+  }, [selectedBoard, selectedQuarter, issueTypeFilter, boardsStatus, retryKey])
 
   // Compute pooled percentiles across all boards' results
   const pooled = useMemo(() => {
@@ -326,7 +303,7 @@ function CycleTimePageInner() {
           <p className="text-sm text-red-600">{pageState.message}</p>
           <button
             type="button"
-            onClick={() => void loadData()}
+            onClick={reload}
             className="mt-2 text-sm font-medium text-red-700 underline hover:no-underline"
           >
             Try again

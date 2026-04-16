@@ -179,6 +179,11 @@ function DoraPageInner() {
   const periodType = (searchParams.get('mode') ?? 'quarter') as 'sprint' | 'quarter'
 
   const [pageState, setPageState] = useState<PageState>({ status: 'idle' })
+  const [retryKey, setRetryKey] = useState(0)
+
+  const reload = useCallback(() => {
+    setRetryKey((k) => k + 1)
+  }, [])
 
   // Sprint mode is only valid when exactly 1 non-Kanban board is selected.
   // Depends on boardsStatus so it re-evaluates once the store is ready.
@@ -207,43 +212,7 @@ function DoraPageInner() {
     [selectedBoards, replaceParams],
   )
 
-  // Main data fetch — fires on filter change (2 calls in parallel)
-  const loadData = useCallback(async (): Promise<void> => {
-    if (selectedBoards.length === 0) {
-      setPageState({ status: 'idle' })
-      return
-    }
-
-    setPageState({ status: 'loading' })
-
-    const boardId = selectedBoards.join(',')
-
-    try {
-      // Fetch trend first so we can align the aggregate window to the rightmost
-      // chart point using the server's timezone, not the browser's local date.
-      const trend = await getDoraTrend({
-        boardId,
-        mode: periodType === 'sprint' ? 'sprints' : 'quarters',
-        limit: 8,
-      })
-
-      // Use the last trend label as the aggregate quarter when it is a
-      // quarter label (server timezone aligned). Fall back to the
-      // browser-derived label when trend data is empty or in sprint mode.
-      const lastLabel = trend.length > 0 ? trend[trend.length - 1].label : undefined
-      const aggregateQuarter =
-        lastLabel?.match(/^\d{4}-Q[1-4]$/) != null ? lastLabel : currentQuarterLabel()
-
-      const aggregate = await getDoraAggregate({ boardId, quarter: aggregateQuarter })
-      setPageState({ status: 'ready', aggregate, trend })
-    } catch (err: unknown) {
-      setPageState({
-        status: 'error',
-        message: err instanceof Error ? err.message : 'Failed to load metrics',
-      })
-    }
-  }, [selectedBoards, periodType])
-
+  // Main data fetch — fires on filter change or retry
   useEffect(() => {
     let cancelled = false
     const run = async (): Promise<void> => {
@@ -254,12 +223,17 @@ function DoraPageInner() {
       setPageState({ status: 'loading' })
       const boardId = selectedBoards.join(',')
       try {
+        // Fetch trend first so we can align the aggregate window to the rightmost
+        // chart point using the server's timezone, not the browser's local date.
         const trend = await getDoraTrend({
           boardId,
           mode: periodType === 'sprint' ? 'sprints' : 'quarters',
           limit: 8,
         })
         if (cancelled) return
+        // Use the last trend label as the aggregate quarter when it is a
+        // quarter label (server timezone aligned). Fall back to the
+        // browser-derived label when trend data is empty or in sprint mode.
         const lastLabel = trend.length > 0 ? trend[trend.length - 1].label : undefined
         const aggregateQuarter =
           lastLabel?.match(/^\d{4}-Q[1-4]$/) != null ? lastLabel : currentQuarterLabel()
@@ -280,7 +254,7 @@ function DoraPageInner() {
     return () => {
       cancelled = true
     }
-  }, [selectedBoards, periodType])
+  }, [selectedBoards, periodType, retryKey])
 
   // RC-5: extract sparklines from TrendPoint[] per metric
   const dfSparkline = useMemo(
@@ -455,7 +429,7 @@ function DoraPageInner() {
           <p className="text-sm text-red-600">{pageState.message}</p>
           <button
             type="button"
-            onClick={() => void loadData()}
+            onClick={reload}
             className="mt-2 text-sm font-medium text-red-700 underline hover:no-underline"
           >
             Try again

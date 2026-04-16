@@ -305,7 +305,7 @@ export default function WeekDetailPage() {
   if (notFound) {
     return (
       <div className="space-y-4">
-        <Breadcrumb segments={[{ label: 'Planning', href: backFallback }, { label: boardId }]} />
+        <Breadcrumb segments={[{ label: from === 'roadmap' ? 'Roadmap' : 'Planning', href: backFallback }, { label: boardId }]} />
         <EmptyState
           title="Week not found"
           message={`No data found for week "${week}" on board "${boardId}".`}
@@ -318,7 +318,7 @@ export default function WeekDetailPage() {
   if (error) {
     return (
       <div className="space-y-4">
-        <Breadcrumb segments={[{ label: 'Planning', href: backFallback }, { label: boardId }]} />
+        <Breadcrumb segments={[{ label: from === 'roadmap' ? 'Roadmap' : 'Planning', href: backFallback }, { label: boardId }]} />
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
           <div className="flex items-start gap-3">
             <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500" />
@@ -340,7 +340,7 @@ export default function WeekDetailPage() {
   if (!data) {
     return (
       <div className="space-y-4">
-        <Breadcrumb segments={[{ label: 'Planning', href: backFallback }, { label: boardId }]} />
+        <Breadcrumb segments={[{ label: from === 'roadmap' ? 'Roadmap' : 'Planning', href: backFallback }, { label: boardId }]} />
         <EmptyState title="No data" message="No week data available." />
       </div>
     )
@@ -356,7 +356,7 @@ export default function WeekDetailPage() {
         <div className="mb-2">
           <Breadcrumb
             segments={[
-              { label: 'Planning', href: backFallback },
+              { label: from === 'roadmap' ? 'Roadmap' : 'Planning', href: backFallback },
               { label: boardId },
               { label: week },
             ]}
