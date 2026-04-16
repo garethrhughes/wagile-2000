@@ -35,3 +35,4 @@
 | [0031](0031-mttr-headline-chart-discrepancy.md) | MTTR Headline / Chart Discrepancy: Root Cause & Fix | Accepted | 2026-04-15 |
 | [0032](0032-failure-link-types-detail-view-consistency.md) | Apply `failureLinkTypes` AND-gate consistently across all detail views | Draft | 2026-04-16 |
 | [0033](0033-dora-trend-endpoint-performance.md) | DORA Trend Endpoint Performance | Draft | 2026-04-16 |
+| [0034](0034-changelog-lower-bound-filter-fix.md) | Changelog Lower-Bound Date Filter Bug Fix (Lead Time & MTTR) | Accepted | 2026-04-16 |

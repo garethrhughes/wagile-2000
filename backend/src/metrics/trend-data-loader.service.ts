@@ -103,6 +103,10 @@ export class TrendDataLoader {
         .createQueryBuilder('cl')
         .where('cl.issueKey IN (:...keys)', { keys: issueKeys })
         .andWhere('cl.field = :field', { field: 'status' })
+        // Lower bound is rangeStart (the full trend span start), NOT a per-period
+        // startDate.  Lead Time and MTTR need pre-period changelogs to find
+        // in-progress transitions for issues already in-flight when a period opens.
+        // DF and CFR only need within-period events and tolerate this bound.
         .andWhere('cl.changedAt >= :from', { from: rangeStart })
         .orderBy('cl.changedAt', 'ASC')
         .getMany(),

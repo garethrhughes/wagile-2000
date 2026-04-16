@@ -178,12 +178,55 @@ describe('MttrService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Change 1: changelog query must include changedAt >= startDate lower bound
+  // Fix 0034: in-flight incidents (In Progress before startDate) must use the
+  // correct start time, not fall back to createdAt
   // ---------------------------------------------------------------------------
 
-  it('passes changedAt >= startDate to the changelog query builder', async () => {
+  it('uses the pre-period In Progress transition as startTime, not createdAt (proposal 0034)', async () => {
+    const start = new Date('2025-02-01');
+    const end   = new Date('2025-03-31');
+
+    boardConfigRepo.findOne.mockResolvedValue({
+      boardId: 'ACC',
+      boardType: 'scrum',
+      incidentIssueTypes: ['Incident'],
+      recoveryStatusNames: ['Done'],
+      incidentLabels: [],
+      incidentPriorities: [],
+      inProgressStatusNames: ['In Progress'],
+      dataStartDate: null,
+    } as unknown as BoardConfig);
+
+    // Incident created well before the window; moved to In Progress before window opens
+    const createdAt    = new Date('2025-01-01T00:00:00Z');
+    const inProgress   = new Date('2025-01-20T00:00:00Z'); // before start
+    const recoveryDate = new Date('2025-02-20T00:00:00Z'); // within window — 31 days after In Progress
+
+    issueRepo.find.mockResolvedValue([
+      { key: 'ACC-1', boardId: 'ACC', issueType: 'Incident', labels: [], priority: null, createdAt },
+    ] as unknown as JiraIssue[]);
+
+    changelogRepo.createQueryBuilder = jest.fn().mockReturnValue({
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([
+        { issueKey: 'ACC-1', field: 'status', toValue: 'In Progress', changedAt: inProgress },
+        { issueKey: 'ACC-1', field: 'status', toValue: 'Done',        changedAt: recoveryDate },
+      ]),
+    });
+
+    const result = await service.calculate('ACC', start, end);
+
+    expect(result.incidentCount).toBe(1);
+    // MTTR should be from inProgress → recoveryDate = 31 days = 744 hours
+    // NOT from createdAt → recoveryDate = 50 days = 1200 hours
+    expect(result.medianHours).toBeCloseTo(31 * 24, 0);
+  });
+
+  it('does not pass a changedAt lower-bound to the changelog query builder', async () => {
     const start = new Date('2025-01-01');
-    const end = new Date('2025-03-31');
+    const end   = new Date('2025-03-31');
 
     boardConfigRepo.findOne.mockResolvedValue({
       boardId: 'ACC',
@@ -213,8 +256,7 @@ describe('MttrService', () => {
     const changedAtCall = andWhere.mock.calls.find(
       (args) => typeof args[0] === 'string' && args[0].includes('changedAt'),
     );
-    expect(changedAtCall).toBeDefined();
-    expect(changedAtCall?.[1]).toMatchObject({ from: start });
+    expect(changedAtCall).toBeUndefined();
   });
 
   // -------------------------------------------------------------------------

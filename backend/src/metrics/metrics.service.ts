@@ -315,17 +315,17 @@ export class MetricsService {
         );
       }
 
-      const sprints = await this.sprintRepo.find({
+      const sprints = (await this.sprintRepo.find({
         where: { boardId, state: 'closed' },
         order: { endDate: 'DESC' },
         take: limit,
-      });
+      })).filter((s) => s.startDate !== null && s.endDate !== null);
 
       if (sprints.length === 0) return [];
 
       // Determine full date range spanning all sprints
-      const rangeStart = sprints[sprints.length - 1].startDate ?? new Date();
-      const rangeEnd   = sprints[0].endDate ?? new Date();
+      const rangeStart = sprints[sprints.length - 1].startDate as Date;
+      const rangeEnd   = sprints[0].endDate as Date;
 
       // Load data once per board for the full span
       const slices = await Promise.all(
@@ -333,8 +333,8 @@ export class MetricsService {
       );
 
       const points = sprints.map((sprint): TrendPoint => {
-        const periodStart = sprint.startDate ?? new Date();
-        const periodEnd   = sprint.endDate ?? new Date();
+        const periodStart = sprint.startDate as Date;
+        const periodEnd   = sprint.endDate as Date;
         const agg = this.buildOrgDoraResultFromData(slices, periodStart, periodEnd);
         return {
           label: sprint.name,

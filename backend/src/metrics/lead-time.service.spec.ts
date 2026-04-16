@@ -189,12 +189,45 @@ describe('LeadTimeService', () => {
   // ---------------------------------------------------------------------------
 
   // ---------------------------------------------------------------------------
-  // Change 1: changelog query must include changedAt >= startDate lower bound
+  // Fix 0034: in-flight issues (In Progress before startDate) must be included
   // ---------------------------------------------------------------------------
 
-  it('passes changedAt >= startDate to the changelog query builder', async () => {
+  it('includes issues whose In Progress transition precedes startDate (proposal 0034)', async () => {
+    const start = new Date('2025-02-01');
+    const end   = new Date('2025-03-31');
+
+    // Issue started In Progress before the measurement window opens
+    const inProgress = new Date('2025-01-10T09:00:00Z'); // before start
+    const done       = new Date('2025-02-15T09:00:00Z'); // within window
+
+    issueRepo.find.mockResolvedValue([
+      { key: 'ACC-1', boardId: 'ACC', issueType: 'Story', createdAt: inProgress, fixVersion: null, labels: [] },
+    ] as unknown as JiraIssue[]);
+
+    const qb = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([
+        { issueKey: 'ACC-1', field: 'status', toValue: 'In Progress', changedAt: inProgress },
+        { issueKey: 'ACC-1', field: 'status', toValue: 'Done',        changedAt: done },
+      ]),
+    };
+    changelogRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+    versionRepo.find.mockResolvedValue([]);
+
+    const { observations, anomalyCount } = await service.getLeadTimeObservations('ACC', start, end);
+
+    // Issue must appear in the sample (not discarded as anomaly)
+    expect(observations).toHaveLength(1);
+    expect(anomalyCount).toBe(0);
+    // Lead time = In Progress → Done ≈ 36 days
+    expect(observations[0]).toBeGreaterThan(30);
+  });
+
+  it('does not pass a changedAt lower-bound to the changelog query builder', async () => {
     const start = new Date('2025-01-01');
-    const end = new Date('2025-03-31');
+    const end   = new Date('2025-03-31');
 
     issueRepo.find.mockResolvedValue([
       { key: 'ACC-1', boardId: 'ACC', issueType: 'Story', createdAt: new Date('2024-06-01'), fixVersion: null, labels: [] },
@@ -215,8 +248,7 @@ describe('LeadTimeService', () => {
     const changedAtCall = andWhere.mock.calls.find(
       (args) => typeof args[0] === 'string' && args[0].includes('changedAt'),
     );
-    expect(changedAtCall).toBeDefined();
-    expect(changedAtCall?.[1]).toMatchObject({ from: start });
+    expect(changedAtCall).toBeUndefined();
   });
 
   // ---------------------------------------------------------------------------

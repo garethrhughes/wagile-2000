@@ -76,13 +76,14 @@ export class LeadTimeService {
     const issueKeys = issues.map((i) => i.key);
 
     // Fetch all status changelogs in bulk for these issues.
-    // Lower-bound on changedAt avoids loading transitions from before the period
-    // window, which would be discarded anyway and waste I/O on large boards.
+    // No lower-bound on changedAt: Lead Time needs pre-period in-progress
+    // transitions to determine when work started on issues that were already
+    // in-flight when the measurement window opens.  Period-scoping is applied
+    // per-issue below via the doneTransition filter.
     const changelogs = await this.changelogRepo
       .createQueryBuilder('cl')
       .where('cl.issueKey IN (:...keys)', { keys: issueKeys })
       .andWhere('cl.field = :field', { field: 'status' })
-      .andWhere('cl.changedAt >= :from', { from: startDate })
       .orderBy('cl.changedAt', 'ASC')
       .getMany();
 

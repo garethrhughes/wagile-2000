@@ -99,15 +99,14 @@ export class MttrService {
     const incidentKeys = priorityFilteredIssues.map((i) => i.key);
 
     // Get all status changelogs for incident issues.
-    // Lower-bound on changedAt avoids loading transitions from before the period
-    // window.  In Progress transitions before startDate are rare for incidents
-    // (incidents are typically short-lived), and createdAt is used as the fallback
-    // start time when no In Progress transition is found.
+    // No lower-bound on changedAt: MTTR needs pre-period in-progress transitions
+    // to determine the correct start time for incidents that were already in-flight
+    // when the measurement window opens.  Period-scoping is applied via the
+    // recoveryChangelogs filter below.
     const allIncidentChangelogs = await this.changelogRepo
       .createQueryBuilder('cl')
       .where('cl.issueKey IN (:...keys)', { keys: incidentKeys })
       .andWhere('cl.field = :field', { field: 'status' })
-      .andWhere('cl.changedAt >= :from', { from: startDate })
       .orderBy('cl.changedAt', 'ASC')
       .getMany();
 
