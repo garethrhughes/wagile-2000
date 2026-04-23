@@ -62,9 +62,12 @@ export class CfrService {
     ];
     const failureLinkTypes = config?.failureLinkTypes ?? [];
 
-    // Count total deployments (issues that reached done in the period)
+    // Count total deployments (issues that reached done in the period).
+    // select projection: omit heavy columns (summary, description) that are
+    // not needed for CFR classification — reduces per-row memory significantly.
     const allIssues = (await this.issueRepo.find({
       where: { boardId },
+      select: ['key', 'issueType', 'fixVersion', 'labels'],
     })).filter((i) => isWorkItem(i.issueType));
 
     if (allIssues.length === 0) {

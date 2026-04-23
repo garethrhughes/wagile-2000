@@ -1,6 +1,17 @@
-.PHONY: install up down migrate seed dev-api dev-web test-api test-web sync start stop clean reset
+.PHONY: install up down migrate seed dev-api dev-web test-api test-web sync start stop clean reset \
+        tf-plan tf-apply ecr-push
 
-# Infrastructure
+# ── Deploy ──────────────────────────────────────────────────────────────────
+tf-plan:
+	./scripts/tf-apply.sh --plan-only
+
+tf-apply:
+	./scripts/tf-apply.sh
+
+ecr-push:
+	./scripts/ecr-push.sh
+
+# ── Local infrastructure ─────────────────────────────────────────────────────
 up:
 	docker compose up -d
 

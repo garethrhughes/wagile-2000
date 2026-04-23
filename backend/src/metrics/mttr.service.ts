@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import {
   JiraIssue,
   JiraChangelog,
@@ -70,9 +70,20 @@ export class MttrService {
     const incidentPriorities = config?.incidentPriorities ?? ['Critical'];
     const inProgressNames: string[] = config?.inProgressStatusNames ?? DEFAULT_IN_PROGRESS_NAMES;
 
-    // Get incident issues for this board
+    // Get incident issues for this board.
+    // Pre-filter by issueType at DB level and select only columns needed for
+    // MTTR classification — prevents loading all board issues when only Bug/Incident
+    // types are relevant. Labels-based incidents still require in-memory filtering
+    // so we union with the label-matched set below.
     const allIssues = (await this.issueRepo.find({
-      where: { boardId },
+      where: incidentLabels.length > 0
+        // When label-based incidents are configured we must load all work-item
+        // types to catch label matches; scope to known incident types + all others
+        // via a two-pass filter below.
+        ? { boardId }
+        // No label config: safely scope to known incident issue types only.
+        : { boardId, issueType: In(incidentIssueTypes) },
+      select: ['key', 'issueType', 'labels', 'priority', 'createdAt'],
     })).filter((i) => isWorkItem(i.issueType));
 
     const incidentIssues = allIssues.filter((issue) => {

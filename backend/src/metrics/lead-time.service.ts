@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, Between } from 'typeorm';
 import {
   JiraIssue,
   JiraChangelog,
@@ -66,16 +66,69 @@ export class LeadTimeService {
     const doneStatuses = config?.doneStatusNames ?? ['Done', 'Closed', 'Released'];
     const inProgressNames: string[] = config?.inProgressStatusNames ?? DEFAULT_IN_PROGRESS_NAMES;
 
-    // Get all issues for this board
+    // Step 1: Collect candidate issue keys — only issues that completed in this period.
+    // Loading board-scoped issue keys first (key column only) then filtering via
+    // changelog prevents loading thousands of historical issues + their changelogs for
+    // boards like PLAT (1000+ Kanban issues) where most never appear in the period.
+    const [allBoardKeyRows, releasedVersions] = await Promise.all([
+      this.issueRepo.find({ where: { boardId }, select: ['key'] }),
+      this.versionRepo.find({
+        where: {
+          projectKey: boardId,
+          released: true,
+          releaseDate: Between(startDate, endDate),
+        },
+      }),
+    ]);
+
+    const boardKeyList = allBoardKeyRows.map((i) => i.key);
+    if (boardKeyList.length === 0) return { observations: [], anomalyCount: 0 };
+
+    // 1a. Keys that transitioned to a done status in the period
+    const doneRows = await this.changelogRepo
+      .createQueryBuilder('cl')
+      .select('DISTINCT cl."issueKey"', 'issueKey')
+      .where('cl."issueKey" IN (:...keys)', { keys: boardKeyList })
+      .andWhere('cl.field = :field', { field: 'status' })
+      .andWhere('cl."toValue" IN (:...statuses)', { statuses: doneStatuses })
+      .andWhere('cl."changedAt" BETWEEN :start AND :end', {
+        start: startDate,
+        end: endDate,
+      })
+      .getRawMany<{ issueKey: string }>();
+
+    const candidateKeys = new Set(doneRows.map((r) => r.issueKey));
+
+    // 1b. Version release date map + fixVersion keys for the period
+    const versionDateMap = new Map(
+      releasedVersions
+        .filter((v) => v.releaseDate !== null)
+        .map((v) => [v.name, v.releaseDate as Date]),
+    );
+    const releasedVersionNames = [...versionDateMap.keys()];
+    if (releasedVersionNames.length > 0) {
+      const fixVersionRows = await this.issueRepo.find({
+        where: { boardId, fixVersion: In(releasedVersionNames) },
+        select: ['key', 'issueType'],
+      });
+      for (const i of fixVersionRows) {
+        if (isWorkItem(i.issueType)) candidateKeys.add(i.key);
+      }
+    }
+
+    if (candidateKeys.size === 0) return { observations: [], anomalyCount: 0 };
+
+    // Step 2: Load only candidate issues with minimal column projection
     const issues = (await this.issueRepo.find({
-      where: { boardId },
+      where: { boardId, key: In([...candidateKeys]) },
+      select: ['key', 'issueType', 'fixVersion'],
     })).filter((i) => isWorkItem(i.issueType));
 
     if (issues.length === 0) return { observations: [], anomalyCount: 0 };
 
     const issueKeys = issues.map((i) => i.key);
 
-    // Fetch all status changelogs in bulk for these issues.
+    // Step 3: Fetch all status changelogs for candidate issues only.
     // No lower-bound on changedAt: Lead Time needs pre-period in-progress
     // transitions to determine when work started on issues that were already
     // in-flight when the measurement window opens.  Period-scoping is applied
@@ -94,24 +147,6 @@ export class LeadTimeService {
       list.push(cl);
       changelogsByIssue.set(cl.issueKey, list);
     }
-
-    // Pre-fetch version release dates for fixVersion lead time
-    const versionNames = [
-      ...new Set(
-        issues.map((i) => i.fixVersion).filter((v): v is string => v !== null),
-      ),
-    ];
-    const versions =
-      versionNames.length > 0
-        ? await this.versionRepo.find({
-            where: { name: In(versionNames), projectKey: boardId },
-          })
-        : [];
-    const versionDateMap = new Map(
-      versions
-        .filter((v) => v.releaseDate !== null)
-        .map((v) => [v.name, v.releaseDate as Date]),
-    );
 
     const leadTimeDays: number[] = [];
     let anomalyCount = 0;

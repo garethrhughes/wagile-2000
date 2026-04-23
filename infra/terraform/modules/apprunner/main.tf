@@ -32,16 +32,20 @@ resource "aws_apprunner_service" "backend" {
 
         # Plain environment variables (non-sensitive)
         runtime_environment_variables = {
-          NODE_ENV    = "production"
-          PORT        = "3001"
-          DB_PORT     = "5432"
-          DB_DATABASE = "fragile"
-          DB_USERNAME = "postgres"
+          NODE_ENV     = "production"
+          PORT         = "3001"
+          DB_PORT      = "5432"
+          DB_DATABASE  = "fragile"
+          DB_USERNAME  = "postgres"
           # DB_HOST is injected directly because App Runner's secrets block
           # only supports Secrets Manager ARNs and SSM param ARNs, not plain
           # string values from Terraform outputs. We inject the RDS endpoint
           # as a plain env var here — it is not a secret.
-          DB_HOST = var.rds_endpoint
+          DB_HOST      = var.rds_endpoint
+          # FRONTEND_URL is the CORS allowed-origin for the backend. It is not
+          # sensitive — injected as a plain variable so it never depends on a
+          # manually-updated SSM placeholder value.
+          FRONTEND_URL = var.frontend_url
         }
 
         # Secrets and SSM parameters — App Runner fetches these at runtime.
@@ -52,7 +56,6 @@ resource "aws_apprunner_service" "backend" {
           JIRA_API_TOKEN  = var.jira_api_token_secret_arn
           JIRA_BASE_URL   = var.jira_base_url_param_arn
           JIRA_USER_EMAIL = var.jira_user_email_param_arn
-          FRONTEND_URL    = var.frontend_url_param_arn
           TIMEZONE        = var.timezone_param_arn
         }
       }
@@ -62,8 +65,8 @@ resource "aws_apprunner_service" "backend" {
   }
 
   instance_configuration {
-    cpu               = "512"
-    memory            = "1024"
+    cpu               = "1024"
+    memory            = "2048"
     instance_role_arn = var.backend_instance_role_arn
   }
 
@@ -116,9 +119,13 @@ resource "aws_apprunner_service" "frontend" {
         port = "3000"
 
         runtime_environment_variables = {
-          NODE_ENV              = "production"
-          # The backend custom domain URL, stable from before service creation.
+          NODE_ENV            = "production"
           NEXT_PUBLIC_API_URL = var.backend_url
+          # Force Next.js standalone server to bind on all interfaces.
+          # App Runner's container runtime sets HOSTNAME to the internal EC2
+          # hostname, overriding the Dockerfile ENV. Explicitly setting it here
+          # takes precedence and ensures the health checker can reach the server.
+          HOSTNAME            = "0.0.0.0"
         }
       }
     }
@@ -134,7 +141,7 @@ resource "aws_apprunner_service" "frontend" {
 
   health_check_configuration {
     protocol            = "HTTP"
-    path                = "/"
+    path                = "/api/health"
     interval            = 10
     timeout             = 5
     healthy_threshold   = 1

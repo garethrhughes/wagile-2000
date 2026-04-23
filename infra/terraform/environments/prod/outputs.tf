@@ -1,3 +1,13 @@
+output "backend_service_arn" {
+  description = "The ARN of the backend App Runner service."
+  value       = module.apprunner.backend_service_arn
+}
+
+output "frontend_service_arn" {
+  description = "The ARN of the frontend App Runner service."
+  value       = module.apprunner.frontend_service_arn
+}
+
 output "backend_service_url" {
   description = "The backend App Runner service URL."
   value       = module.apprunner.backend_service_url

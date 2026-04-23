@@ -10,7 +10,99 @@ resource "aws_vpc" "main" {
   }
 }
 
-# ── Private subnets (2 AZs — required by RDS subnet group) ──────────────────
+# ── Internet Gateway ──────────────────────────────────────────────────────────
+
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+
+  tags = {
+    Name = "fragile-igw"
+  }
+}
+
+# ── Public subnet (NAT Gateway lives here) ────────────────────────────────────
+# One AZ is sufficient — NAT Gateway is a managed, highly available service.
+
+resource "aws_subnet" "public_a" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.0.0/24"
+  availability_zone       = "${var.aws_region}a"
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "fragile-public-a"
+    Tier = "public"
+  }
+}
+
+# ── NAT Gateway ───────────────────────────────────────────────────────────────
+# Allows the private subnets (and the App Runner VPC connector) to initiate
+# outbound connections to the internet (e.g. Jira API) while remaining
+# unreachable from the internet themselves.
+
+resource "aws_eip" "nat" {
+  domain = "vpc"
+
+  tags = {
+    Name = "fragile-nat-eip"
+  }
+}
+
+resource "aws_nat_gateway" "main" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public_a.id
+
+  tags = {
+    Name = "fragile-nat"
+  }
+
+  depends_on = [aws_internet_gateway.main]
+}
+
+# ── Route tables ──────────────────────────────────────────────────────────────
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
+
+  tags = {
+    Name = "fragile-public-rt"
+  }
+}
+
+resource "aws_route_table_association" "public_a" {
+  subnet_id      = aws_subnet.public_a.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table" "private" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.main.id
+  }
+
+  tags = {
+    Name = "fragile-private-rt"
+  }
+}
+
+resource "aws_route_table_association" "private_a" {
+  subnet_id      = aws_subnet.private_a.id
+  route_table_id = aws_route_table.private.id
+}
+
+resource "aws_route_table_association" "private_b" {
+  subnet_id      = aws_subnet.private_b.id
+  route_table_id = aws_route_table.private.id
+}
+
+# ── Private subnets (2 AZs — required by RDS subnet group) ───────────────────
 
 resource "aws_subnet" "private_a" {
   vpc_id                  = aws_vpc.main.id
@@ -36,18 +128,16 @@ resource "aws_subnet" "private_b" {
   }
 }
 
-# ── Security group: App Runner VPC connector ─────────────────────────────────
+# ── Security group: App Runner VPC connector ──────────────────────────────────
 # App Runner attaches this SG to the ENIs it places in the private subnets.
-# Outbound to RDS on 5432 is controlled by the RDS SG (inbound rule below).
 
 resource "aws_security_group" "apprunner_connector" {
   name        = "fragile-apprunner-connector-sg"
   description = "Security group attached to the App Runner VPC connector ENIs."
   vpc_id      = aws_vpc.main.id
 
-  # Allow all outbound traffic from the connector (needed for RDS + DNS resolution).
   egress {
-    description = "Allow all outbound traffic"
+    description = "Allow all outbound traffic (RDS + internet via NAT)"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -59,7 +149,7 @@ resource "aws_security_group" "apprunner_connector" {
   }
 }
 
-# ── Security group: RDS ──────────────────────────────────────────────────────
+# ── Security group: RDS ───────────────────────────────────────────────────────
 # Inbound PostgreSQL only from the App Runner VPC connector SG.
 
 resource "aws_security_group" "rds" {
@@ -88,8 +178,9 @@ resource "aws_security_group" "rds" {
   }
 }
 
-# ── App Runner VPC connector ─────────────────────────────────────────────────
+# ── App Runner VPC connector ──────────────────────────────────────────────────
 # Attached to the backend App Runner service so it can reach RDS in the VPC.
+# Outbound internet traffic (Jira API etc.) routes via the NAT Gateway.
 # The frontend service does NOT use a VPC connector.
 
 resource "aws_apprunner_vpc_connector" "main" {

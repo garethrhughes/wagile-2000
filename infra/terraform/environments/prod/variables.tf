@@ -39,3 +39,9 @@ variable "frontend_image_tag" {
   type        = string
   default     = "latest"
 }
+
+variable "allowed_cidrs" {
+  description = "IPv4 CIDRs permitted to reach the frontend and backend via WAF. All other traffic is blocked."
+  type        = list(string)
+  # No default — must be supplied in terraform.tfvars.
+}

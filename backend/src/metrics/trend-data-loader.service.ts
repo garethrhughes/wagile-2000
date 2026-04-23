@@ -96,11 +96,16 @@ export class TrendDataLoader {
     rangeStart: Date,
     rangeEnd: Date,
   ): Promise<TrendDataSlice> {
-    // Load board config, working-time config, and all raw issues in parallel
+    // Load board config, working-time config, and all raw issues in parallel.
+    // select projection: only columns consumed by the in-memory metric paths —
+    // omitting summary and other large text columns cuts per-issue memory by ~80%.
     const [boardConfig, wtEntity, rawIssues] = await Promise.all([
       this.boardConfigRepo.findOne({ where: { boardId } }),
       this.workingTimeService.getConfig(),
-      this.issueRepo.find({ where: { boardId } }),
+      this.issueRepo.find({
+        where: { boardId },
+        select: ['key', 'issueType', 'fixVersion', 'labels', 'priority', 'createdAt'],
+      }),
     ]);
 
     const issues = rawIssues.filter((i) => isWorkItem(i.issueType));
@@ -135,6 +140,7 @@ export class TrendDataLoader {
       }),
       this.issueLinkRepo.find({
         where: { sourceIssueKey: In(issueKeys) },
+        select: ['sourceIssueKey', 'linkTypeName'],
       }),
     ]);
 

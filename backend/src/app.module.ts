@@ -34,6 +34,9 @@ import { SprintReportModule } from './sprint-report/sprint-report.module.js';
         username: config.get<string>('DB_USERNAME', 'postgres'),
         password: config.get<string>('DB_PASSWORD', 'postgres'),
         database: config.get<string>('DB_DATABASE', 'ai_starter'),
+        ssl: config.get<string>('NODE_ENV') === 'production'
+          ? { rejectUnauthorized: false }
+          : false,
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
         migrations: [__dirname + '/migrations/*{.ts,.js}'],
         migrationsRun: true,

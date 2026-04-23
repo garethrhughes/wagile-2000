@@ -74,11 +74,6 @@ variable "jira_user_email_param_arn" {
   type        = string
 }
 
-variable "frontend_url_param_arn" {
-  description = "ARN of the SSM parameter for the frontend URL (CORS origin)."
-  type        = string
-}
-
 variable "timezone_param_arn" {
   description = "ARN of the SSM parameter for the application timezone."
   type        = string

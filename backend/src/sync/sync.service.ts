@@ -104,14 +104,23 @@ export class SyncService {
       );
     }
 
-    // Auto-generate reports for any newly closed sprints (fire-and-forget)
-    for (const boardId of boardIds) {
-      this.triggerSprintReportsForBoard(boardId).catch((err: unknown) =>
-        this.logger.warn(
-          `Sprint report trigger failed for ${boardId}: ${err instanceof Error ? err.message : String(err)}`,
-        ),
-      );
-    }
+    // Auto-generate reports for any newly closed sprints (fire-and-forget,
+    // but sequential across boards to avoid peak memory pressure from running
+    // all boards' report generation concurrently on a fresh deployment).
+    const generateAllReports = async () => {
+      for (const boardId of boardIds) {
+        await this.triggerSprintReportsForBoard(boardId).catch((err: unknown) =>
+          this.logger.warn(
+            `Sprint report trigger failed for ${boardId}: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
+      }
+    };
+    generateAllReports().catch((err: unknown) =>
+      this.logger.warn(
+        `Sprint report generation failed: ${err instanceof Error ? err.message : String(err)}`,
+      ),
+    );
 
     return { boards: boardIds, results };
   }

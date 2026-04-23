@@ -1,8 +1,7 @@
 # ============================================================
 # Fragile — Production environment
 # ============================================================
-# This file composes all child modules into the production
-# deployment. Run from this directory:
+# Run from this directory:
 #
 #   terraform init
 #   terraform plan -var-file="terraform.tfvars"
@@ -32,6 +31,20 @@ provider "aws" {
   }
 }
 
+# ACM certificates for CloudFront and CloudFront-scoped WAF must be in us-east-1.
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  default_tags {
+    tags = {
+      Project     = "fragile"
+      Environment = var.environment
+      ManagedBy   = "terraform"
+    }
+  }
+}
+
 # ── ECR ────────────────────────────────────────────────────
 module "ecr" {
   source      = "../../modules/ecr"
@@ -46,7 +59,7 @@ module "iam" {
   backend_ecr_arn  = module.ecr.backend_repository_arn
   frontend_ecr_arn = module.ecr.frontend_repository_arn
 
-  db_password_secret_arn   = module.secrets.db_password_secret_arn
+  db_password_secret_arn    = module.secrets.db_password_secret_arn
   jira_api_token_secret_arn = module.secrets.jira_api_token_secret_arn
 
   ssm_parameter_path_prefix = "/fragile/${var.environment}/"
@@ -71,7 +84,7 @@ module "rds" {
   source      = "../../modules/rds"
   environment = var.environment
 
-  subnet_ids          = module.network.private_subnet_ids
+  subnet_ids            = module.network.private_subnet_ids
   rds_security_group_id = module.network.rds_security_group_id
 
   db_password_secret_arn = module.secrets.db_password_secret_arn
@@ -99,24 +112,55 @@ module "apprunner" {
 
   jira_base_url_param_arn   = module.secrets.jira_base_url_param_arn
   jira_user_email_param_arn = module.secrets.jira_user_email_param_arn
-  frontend_url_param_arn    = module.secrets.frontend_url_param_arn
   timezone_param_arn        = module.secrets.timezone_param_arn
 
   backend_url  = "https://${var.backend_subdomain}.${var.domain_name}"
   frontend_url = "https://${var.frontend_subdomain}.${var.domain_name}"
 }
 
-# ── DNS ────────────────────────────────────────────────────
-module "dns" {
-  source      = "../../modules/dns"
-  environment = var.environment
+# ── WAF — CloudFront-scoped IP allowlist ───────────────────
+# Must be deployed in us-east-1 (CloudFront WAF requirement).
+# The WebACL ARN is attached directly to the CloudFront distributions.
+module "waf" {
+  source = "../../modules/waf"
+
+  providers = {
+    aws = aws.us_east_1
+  }
+
+  allowed_cidrs = var.allowed_cidrs
+}
+
+# ── CDN — ACM + CloudFront ─────────────────────────────────
+# Issues ACM certificates in us-east-1, validates them via Route 53,
+# and creates CloudFront distributions in front of both App Runner services.
+module "cdn" {
+  source = "../../modules/cdn"
+
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
 
   domain_name        = var.domain_name
   frontend_subdomain = var.frontend_subdomain
   backend_subdomain  = var.backend_subdomain
 
-  backend_service_url           = module.apprunner.backend_service_url
-  frontend_service_url          = module.apprunner.frontend_service_url
-  backend_apprunner_service_arn = module.apprunner.backend_service_arn
-  frontend_apprunner_service_arn = module.apprunner.frontend_service_arn
+  backend_service_url  = module.apprunner.backend_service_url
+  frontend_service_url = module.apprunner.frontend_service_url
+
+  web_acl_arn = module.waf.web_acl_arn
+}
+
+# ── DNS ────────────────────────────────────────────────────
+module "dns" {
+  source = "../../modules/dns"
+
+  domain_name        = var.domain_name
+  frontend_subdomain = var.frontend_subdomain
+  backend_subdomain  = var.backend_subdomain
+
+  backend_cloudfront_domain  = module.cdn.backend_cloudfront_domain
+  frontend_cloudfront_domain = module.cdn.frontend_cloudfront_domain
+  cloudfront_hosted_zone_id  = module.cdn.cloudfront_hosted_zone_id
 }
