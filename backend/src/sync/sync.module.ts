@@ -14,8 +14,12 @@ import {
   JpdIdea,
   JiraIssueLink,
   JiraFieldConfig,
+  DoraSnapshot,
 } from '../database/entities/index.js';
 import { SprintReportModule } from '../sprint-report/sprint-report.module.js';
+import { LambdaInvokerService } from '../lambda/lambda-invoker.service.js';
+import { InProcessSnapshotService } from '../lambda/in-process-snapshot.service.js';
+import { MetricsModule } from '../metrics/metrics.module.js';
 
 @Module({
   imports: [
@@ -30,12 +34,14 @@ import { SprintReportModule } from '../sprint-report/sprint-report.module.js';
       JpdIdea,
       JiraIssueLink,
       JiraFieldConfig,
+      DoraSnapshot,
     ]),
     JiraModule,
     forwardRef(() => SprintReportModule),
+    MetricsModule,
   ],
   controllers: [SyncController],
-  providers: [SyncService],
+  providers: [SyncService, LambdaInvokerService, InProcessSnapshotService],
   exports: [SyncService],
 })
 export class SyncModule {}

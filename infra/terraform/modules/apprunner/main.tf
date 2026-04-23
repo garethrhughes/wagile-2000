@@ -45,7 +45,10 @@ resource "aws_apprunner_service" "backend" {
           # FRONTEND_URL is the CORS allowed-origin for the backend. It is not
           # sensitive — injected as a plain variable so it never depends on a
           # manually-updated SSM placeholder value.
-          FRONTEND_URL = var.frontend_url
+          FRONTEND_URL              = var.frontend_url
+          DORA_SNAPSHOT_LAMBDA_NAME = var.dora_snapshot_lambda_name
+          AWS_REGION                = var.aws_region
+          USE_LAMBDA                = "true"
         }
 
         # Secrets and SSM parameters — App Runner fetches these at runtime.

@@ -485,7 +485,7 @@ describe('GapsService', () => {
         [], // no sprint changelogs → inSprint = false
       );
 
-      const result = await service.getUnplannedDone('ACC');
+      const result = await service.getUnplannedDone('ACC', undefined, '2026-Q1');
 
       expect(result.issues).toHaveLength(1);
       expect(result.issues[0].key).toBe('ACC-1');
@@ -563,7 +563,7 @@ describe('GapsService', () => {
         ],
       );
 
-      const result = await service.getUnplannedDone('ACC');
+      const result = await service.getUnplannedDone('ACC', undefined, '2026-Q1');
 
       expect(result.issues).toHaveLength(1);
       expect(result.issues[0].key).toBe('ACC-3');
@@ -765,7 +765,7 @@ describe('GapsService', () => {
         [],
       );
 
-      const result = await service.getUnplannedDone('ACC');
+      const result = await service.getUnplannedDone('ACC', undefined, '2026-Q1');
 
       expect(result.summary.total).toBe(3);
       expect(result.summary.totalPoints).toBe(4); // 3 + 1 + 0
@@ -864,7 +864,7 @@ describe('GapsService', () => {
           ),
         );
 
-        const result = await service.getUnplannedDone(undefined);
+        const result = await service.getUnplannedDone(undefined, undefined, '2026-Q1');
 
         expect(result.boardId).toBe('all');
         expect(result.issues).toHaveLength(2);
@@ -965,7 +965,7 @@ describe('GapsService', () => {
           ),
         );
 
-        const result = await service.getUnplannedDone(undefined);
+        const result = await service.getUnplannedDone(undefined, undefined, '2026-Q1');
 
         expect(result.summary.total).toBe(2);
         expect(result.summary.totalPoints).toBe(7);

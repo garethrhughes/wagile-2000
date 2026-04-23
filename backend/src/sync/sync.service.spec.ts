@@ -14,6 +14,7 @@ import {
   JiraFieldConfig,
 } from '../database/entities/index.js';
 import { SprintReportService } from '../sprint-report/sprint-report.service.js';
+import { LambdaInvokerService } from '../lambda/lambda-invoker.service.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -90,6 +91,7 @@ describe('SyncService', () => {
   let issueLinkRepo: jest.Mocked<Repository<JiraIssueLink>>;
   let sprintReportService: jest.Mocked<SprintReportService>;
   let jiraFieldConfigRepo: jest.Mocked<Repository<JiraFieldConfig>>;
+  let lambdaInvoker: jest.Mocked<LambdaInvokerService>;
 
   beforeEach(() => {
     jiraClient = mockJiraClient();
@@ -108,6 +110,9 @@ describe('SyncService', () => {
     jiraFieldConfigRepo = mockRepo<JiraFieldConfig>();
     // By default return the standard field config row
     jiraFieldConfigRepo.findOne.mockResolvedValue(defaultFieldConfig);
+    lambdaInvoker = {
+      invokeSnapshotWorker: jest.fn().mockResolvedValue(undefined),
+    } as unknown as jest.Mocked<LambdaInvokerService>;
 
     service = new SyncService(
       jiraClient,
@@ -122,6 +127,7 @@ describe('SyncService', () => {
       issueLinkRepo,
       sprintReportService,
       jiraFieldConfigRepo,
+      lambdaInvoker,
     );
   });
 
@@ -183,6 +189,27 @@ describe('SyncService', () => {
 
       expect(result.boards).toEqual(['PROJ']);
       expect(result.results).toHaveLength(1);
+    });
+
+    it('invokes Lambda snapshot worker for each board after all syncs complete', async () => {
+      boardConfigRepo.find.mockResolvedValue([
+        { boardId: 'PROJ' } as BoardConfig,
+      ]);
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'PROJ',
+        boardType: 'scrum',
+      } as BoardConfig);
+      jiraClient.getSprints.mockResolvedValue({ values: [] } as never);
+      jiraClient.getProjectVersions.mockResolvedValue([]);
+      roadmapConfigRepo.find.mockResolvedValue([]);
+      syncLogRepo.save.mockImplementation((log) => Promise.resolve(log as SyncLog));
+
+      await service.syncAll();
+
+      // Allow fire-and-forget snapshot invocation loop to settle
+      await new Promise((r) => setImmediate(r));
+
+      expect(lambdaInvoker.invokeSnapshotWorker).toHaveBeenCalledWith('PROJ');
     });
 
     it('continues with other boards when one throws, and swallows syncRoadmaps error', async () => {
@@ -301,6 +328,25 @@ describe('SyncService', () => {
         0,
         ['customfield_10106'],   // epicLinkFieldId null → not added
       );
+    });
+
+    it('invokes Lambda after a successful sync', async () => {
+      jiraClient.getSprints.mockResolvedValue({ values: [] } as never);
+
+      // Lambda is now invoked from syncAll, not syncBoard
+      const log = await service.syncBoard('PROJ');
+
+      expect(log.status).toBe('success');
+      expect(lambdaInvoker.invokeSnapshotWorker).not.toHaveBeenCalled();
+    });
+
+    it('does not fail syncBoard when Lambda invocation fails', async () => {
+      jiraClient.getSprints.mockResolvedValue({ values: [] } as never);
+
+      // Lambda is invoked from syncAll; syncBoard itself never calls it
+      const log = await service.syncBoard('PROJ');
+
+      expect(log.status).toBe('success');
     });
   });
 

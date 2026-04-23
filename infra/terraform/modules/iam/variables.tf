@@ -27,3 +27,8 @@ variable "ssm_parameter_path_prefix" {
   description = "SSM parameter path prefix the backend task role may read (e.g. '/fragile/prod/')."
   type        = string
 }
+
+variable "dora_snapshot_lambda_arn" {
+  description = "ARN of the DORA snapshot Lambda function (for lambda:InvokeFunction permission on the backend task role)."
+  type        = string
+}

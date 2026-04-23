@@ -21,6 +21,7 @@ import type {
 import {
   getDoraAggregate,
   getDoraTrend,
+  SnapshotPendingError,
   type OrgDoraResult,
   type TrendPoint,
 } from '@/lib/api'
@@ -40,6 +41,7 @@ import { MetricHelp, type MetricDefinition } from '@/components/ui/metric-help'
 type PageState =
   | { status: 'idle' }
   | { status: 'loading' }
+  | { status: 'pending' }
   | { status: 'error'; message: string }
   | { status: 'ready'; aggregate: OrgDoraResult; trend: TrendPoint[] }
 
@@ -300,10 +302,14 @@ function DoraPageInner() {
         }
       } catch (err: unknown) {
         if (!cancelled) {
-          setPageState({
-            status: 'error',
-            message: err instanceof Error ? err.message : 'Failed to load metrics',
-          })
+          if (err instanceof SnapshotPendingError) {
+            setPageState({ status: 'pending' })
+          } else {
+            setPageState({
+              status: 'error',
+              message: err instanceof Error ? err.message : 'Failed to load metrics',
+            })
+          }
         }
       }
     }

@@ -11,6 +11,10 @@ tf-apply:
 ecr-push:
 	./scripts/ecr-push.sh
 
+# Note: Lambda is built and deployed automatically as part of tf-apply.
+# The Terraform null_resource compiles the backend, zips dist/ + node_modules/,
+# and uploads the zip directly to AWS Lambda whenever source files change.
+
 # ── Local infrastructure ─────────────────────────────────────────────────────
 up:
 	docker compose up -d

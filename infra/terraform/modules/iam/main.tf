@@ -102,6 +102,14 @@ data "aws_iam_policy_document" "backend_task_permissions" {
     ]
     resources = ["arn:aws:logs:${local.region}:${local.account_id}:log-group:/aws/apprunner/fragile-backend*"]
   }
+
+  # Lambda invocation — for DORA snapshot post-sync computation
+  statement {
+    sid    = "InvokeDoraSnapshotLambda"
+    effect = "Allow"
+    actions = ["lambda:InvokeFunction"]
+    resources = [var.dora_snapshot_lambda_arn]
+  }
 }
 
 resource "aws_iam_role_policy" "backend_task" {

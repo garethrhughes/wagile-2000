@@ -21,6 +21,7 @@ import type {
   JiraIssueLink as JiraIssueLinkType,
 } from '../jira/jira.types.js';
 import { SprintReportService } from '../sprint-report/sprint-report.service.js';
+import { LambdaInvokerService } from '../lambda/lambda-invoker.service.js';
 
 /**
  * Resolved snapshot of JiraFieldConfig used throughout a single sync run.
@@ -75,6 +76,7 @@ export class SyncService {
     private readonly sprintReportService: SprintReportService,
     @InjectRepository(JiraFieldConfig)
     private readonly jiraFieldConfigRepo: Repository<JiraFieldConfig>,
+    private readonly lambdaInvoker: LambdaInvokerService,
   ) {}
 
   @Cron('0 */30 * * * *')
@@ -95,6 +97,26 @@ export class SyncService {
       const result = await this.syncBoard(boardId, fieldConfig);
       results.push(result);
     }
+
+    // Invoke DORA snapshot computation sequentially after all boards have synced.
+    // Sequential execution avoids concurrent heavy computation that can exhaust
+    // the App Runner heap (the same reason sprint report generation is sequential).
+    // Lambda mode returns immediately after async invocation; in-process mode
+    // runs the computation here, so keeping it sequential is essential.
+    const invokeAllSnapshots = async () => {
+      for (const boardId of boardIds) {
+        await this.lambdaInvoker.invokeSnapshotWorker(boardId).catch((err: unknown) =>
+          this.logger.warn(
+            `Snapshot invocation failed for ${boardId}: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
+      }
+    };
+    invokeAllSnapshots().catch((err: unknown) =>
+      this.logger.warn(
+        `Snapshot invocation loop failed: ${err instanceof Error ? err.message : String(err)}`,
+      ),
+    );
 
     try {
       await this.syncRoadmaps(fieldConfig);

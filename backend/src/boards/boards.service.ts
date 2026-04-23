@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { BoardConfig } from '../database/entities/index.js';
 import { CreateBoardDto } from './dto/create-board.dto.js';
 import { UpdateBoardConfigDto } from './dto/update-board-config.dto.js';
+import { LambdaInvokerService } from '../lambda/lambda-invoker.service.js';
 
 @Injectable()
 export class BoardsService {
@@ -12,6 +13,7 @@ export class BoardsService {
   constructor(
     @InjectRepository(BoardConfig)
     private readonly boardConfigRepo: Repository<BoardConfig>,
+    private readonly lambdaInvoker: LambdaInvokerService,
   ) {}
 
   async getAll(): Promise<BoardConfig[]> {
@@ -40,7 +42,15 @@ export class BoardsService {
   ): Promise<BoardConfig> {
     let config = await this.getConfig(boardId);
     config = this.boardConfigRepo.merge(config, dto);
-    return this.boardConfigRepo.save(config);
+    const saved = await this.boardConfigRepo.save(config);
+
+    // Invalidate snapshot — config change affects all metric results.
+    // Fire-and-forget: config update must not fail because Lambda invocation fails.
+    this.lambdaInvoker.invokeSnapshotWorker(boardId).catch(() => {
+      // Already logged inside invokeSnapshotWorker.
+    });
+
+    return saved;
   }
 
   async createBoard(dto: CreateBoardDto): Promise<BoardConfig> {

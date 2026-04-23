@@ -4,6 +4,7 @@ import { BoardsService } from './boards.service.js';
 import { BoardConfig } from '../database/entities/index.js';
 import { CreateBoardDto } from './dto/create-board.dto.js';
 import { UpdateBoardConfigDto } from './dto/update-board-config.dto.js';
+import { LambdaInvokerService } from '../lambda/lambda-invoker.service.js';
 
 function mockRepo(): jest.Mocked<Repository<BoardConfig>> {
   return {
@@ -19,13 +20,21 @@ function mockRepo(): jest.Mocked<Repository<BoardConfig>> {
   } as unknown as jest.Mocked<Repository<BoardConfig>>;
 }
 
+function mockLambdaInvoker(): jest.Mocked<LambdaInvokerService> {
+  return {
+    invokeSnapshotWorker: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<LambdaInvokerService>;
+}
+
 describe('BoardsService', () => {
   let service: BoardsService;
   let repo: jest.Mocked<Repository<BoardConfig>>;
+  let lambdaInvoker: jest.Mocked<LambdaInvokerService>;
 
   beforeEach(() => {
     repo = mockRepo();
-    service = new BoardsService(repo);
+    lambdaInvoker = mockLambdaInvoker();
+    service = new BoardsService(repo, lambdaInvoker);
   });
 
   // ---------------------------------------------------------------------------
@@ -98,6 +107,20 @@ describe('BoardsService', () => {
       expect(repo.merge).toHaveBeenCalledWith(existing, dto);
       expect(repo.save).toHaveBeenCalledWith(merged);
       expect(result).toBe(merged);
+    });
+
+    it('triggers Lambda snapshot recompute after config update', async () => {
+      const existing = { boardId: 'ACC', boardType: 'scrum' } as unknown as BoardConfig;
+      repo.findOne.mockResolvedValue(existing);
+      const dto = { doneStatusNames: ['Released'] } as unknown as UpdateBoardConfigDto;
+      repo.merge.mockReturnValue({ ...existing, ...dto } as BoardConfig);
+      repo.save.mockResolvedValue({ ...existing, ...dto } as BoardConfig);
+
+      await service.updateConfig('ACC', dto);
+
+      // Give the fire-and-forget promise a tick to execute
+      await Promise.resolve();
+      expect(lambdaInvoker.invokeSnapshotWorker).toHaveBeenCalledWith('ACC');
     });
   });
 

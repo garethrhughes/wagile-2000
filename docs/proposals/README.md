@@ -37,3 +37,5 @@
 | [0033](0033-dora-trend-endpoint-performance.md) | DORA Trend Endpoint Performance | Draft | 2026-04-16 |
 | [0034](0034-changelog-lower-bound-filter-fix.md) | Changelog Lower-Bound Date Filter Bug Fix (Lead Time & MTTR) | Accepted | 2026-04-16 |
 | [0035](0035-ux-review-and-improvements.md) | UX Review and Improvements | Draft | 2026-04-16 |
+| [0036](0036-dora-page-reliability-options.md) | DORA Page Reliability in AWS Environment: Options Analysis (revised — OOM constraint) | Draft | 2026-04-23 |
+| [0037](0037-lambda-post-sync-dora-computation.md) | Lambda Post-Sync DORA Snapshot Computation | Draft | 2026-04-23 |

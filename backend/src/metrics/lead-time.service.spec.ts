@@ -15,10 +15,12 @@ function mockRepo<T extends object>(): jest.Mocked<Repository<T>> {
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(null),
     createQueryBuilder: jest.fn().mockReturnValue({
+      select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([]),
+      getRawMany: jest.fn().mockResolvedValue([]),
     }),
   } as unknown as jest.Mocked<Repository<T>>;
 }
@@ -81,6 +83,7 @@ describe('LeadTimeService', () => {
     ] as unknown as JiraIssue[]);
 
     const qb = {
+      select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -88,6 +91,7 @@ describe('LeadTimeService', () => {
         { issueKey: 'ACC-1', field: 'status', toValue: 'In Progress', changedAt: inProgress },
         { issueKey: 'ACC-1', field: 'status', toValue: 'Done', changedAt: done },
       ]),
+      getRawMany: jest.fn().mockResolvedValue([{ issueKey: 'ACC-1' }]),
     };
     changelogRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
     versionRepo.find.mockResolvedValue([]);
@@ -120,6 +124,7 @@ describe('LeadTimeService', () => {
     ] as unknown as JiraIssue[]);
 
     const qb = {
+      select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -127,6 +132,7 @@ describe('LeadTimeService', () => {
         { issueKey: 'PLAT-1', field: 'status', toValue: 'In Progress', changedAt: inProgress },
         { issueKey: 'PLAT-1', field: 'status', toValue: 'Done', changedAt: done },
       ]),
+      getRawMany: jest.fn().mockResolvedValue([{ issueKey: 'PLAT-1' }]),
     };
     changelogRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
     versionRepo.find.mockResolvedValue([]);
@@ -170,10 +176,12 @@ describe('LeadTimeService', () => {
     ]);
 
     const qb = {
+      select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue(changelogs),
+      getRawMany: jest.fn().mockResolvedValue(issues.map(i => ({ issueKey: i.key }))),
     };
     changelogRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
     versionRepo.find.mockResolvedValue([]);
@@ -205,6 +213,7 @@ describe('LeadTimeService', () => {
     ] as unknown as JiraIssue[]);
 
     const qb = {
+      select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -212,6 +221,7 @@ describe('LeadTimeService', () => {
         { issueKey: 'ACC-1', field: 'status', toValue: 'In Progress', changedAt: inProgress },
         { issueKey: 'ACC-1', field: 'status', toValue: 'Done',        changedAt: done },
       ]),
+      getRawMany: jest.fn().mockResolvedValue([{ issueKey: 'ACC-1' }]),
     };
     changelogRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
     versionRepo.find.mockResolvedValue([]);
@@ -233,19 +243,38 @@ describe('LeadTimeService', () => {
       { key: 'ACC-1', boardId: 'ACC', issueType: 'Story', createdAt: new Date('2024-06-01'), fixVersion: null, labels: [] },
     ] as unknown as JiraIssue[]);
 
-    const andWhere = jest.fn().mockReturnThis();
-    const qb = {
+    // The service makes two createQueryBuilder calls:
+    //   1st: doneRows — uses .select().getRawMany() with a BETWEEN clause (expected)
+    //   2nd: changelogs — uses .getMany() and must NOT have a changedAt clause
+    // Use separate QB instances so we can assert on the second call independently.
+    const changelogAndWhere = jest.fn().mockReturnThis();
+    const doneRowsQb = {
+      select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
-      andWhere,
+      andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue([]),
+      getRawMany: jest.fn().mockResolvedValue([{ issueKey: 'ACC-1' }]),
     };
-    changelogRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+    const changelogQb = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: changelogAndWhere,
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+      getRawMany: jest.fn().mockResolvedValue([]),
+    };
+
+    let callCount = 0;
+    changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+      callCount++;
+      return callCount === 1 ? doneRowsQb : changelogQb;
+    });
     versionRepo.find.mockResolvedValue([]);
 
     await service.getLeadTimeObservations('ACC', start, end);
 
-    const changedAtCall = andWhere.mock.calls.find(
+    const changedAtCall = changelogAndWhere.mock.calls.find(
       (args) => typeof args[0] === 'string' && args[0].includes('changedAt'),
     );
     expect(changedAtCall).toBeUndefined();
@@ -385,6 +414,7 @@ describe('LeadTimeService', () => {
     ] as unknown as JiraIssue[]);
 
     const qb = {
+      select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -392,6 +422,7 @@ describe('LeadTimeService', () => {
         { issueKey: 'ACC-1', field: 'status', toValue: 'In Progress', changedAt: inProgress },
         { issueKey: 'ACC-1', field: 'status', toValue: 'Done', changedAt: done },
       ]),
+      getRawMany: jest.fn().mockResolvedValue([{ issueKey: 'ACC-1' }]),
     };
     changelogRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
     versionRepo.find.mockResolvedValue([]);

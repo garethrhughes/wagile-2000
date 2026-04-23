@@ -138,6 +138,17 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Thrown by getDoraTrend / getDoraAggregate when the backend returns HTTP 202,
+ * meaning the DORA snapshot has not yet been computed (first sync still running).
+ */
+export class SnapshotPendingError extends Error {
+  constructor(message = 'DORA snapshot not yet available. Sync in progress.') {
+    super(message);
+    this.name = 'SnapshotPendingError';
+  }
+}
+
 // ---- Core fetch helper ---------------------------------------------------
 
 export async function apiFetch<T>(
@@ -665,32 +676,44 @@ export interface DoraTrendParams {
   limit?: number
 }
 
+/**
+ * Fetches a DORA snapshot endpoint. Throws SnapshotPendingError on HTTP 202
+ * (snapshot not yet computed), which is distinct from the sync 202 response.
+ */
+async function fetchDoraSnapshot<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    next: { revalidate: 60 },
+  } as RequestInit)
+
+  if (res.status === 202) throw new SnapshotPendingError()
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new ApiError(res.status, `API error ${res.status}: ${body}`)
+  }
+
+  return res.json() as Promise<T>
+}
+
 export function getDoraAggregate(params: DoraAggregateParams): Promise<OrgDoraResult> {
-  return apiFetch(
+  return fetchDoraSnapshot(
     `/api/metrics/dora/aggregate${toQueryString({
       boardId: params.boardId,
       quarter: params.quarter,
       sprintId: params.sprintId,
       period: params.period,
     })}`,
-    // next.revalidate: 60 — allow Next.js fetch cache to serve this
-    // response for up to 60 s before revalidating.  DORA metrics are
-    // computed from historical Jira data and are safe to cache briefly.
-    { next: { revalidate: 60 } } as RequestInit,
   )
 }
 
 export function getDoraTrend(params: DoraTrendParams): Promise<TrendResponse> {
-  return apiFetch(
+  return fetchDoraSnapshot(
     `/api/metrics/dora/trend${toQueryString({
       boardId: params.boardId,
       mode: params.mode,
       limit: params.limit !== undefined ? String(params.limit) : undefined,
     })}`,
-    // next.revalidate: 60 — allow Next.js fetch cache to serve this
-    // response for up to 60 s before revalidating.  Trend data is derived
-    // from historical Jira records and is safe to cache briefly.
-    { next: { revalidate: 60 } } as RequestInit,
   )
 }
 

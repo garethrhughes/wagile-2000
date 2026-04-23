@@ -63,6 +63,8 @@ module "iam" {
   jira_api_token_secret_arn = module.secrets.jira_api_token_secret_arn
 
   ssm_parameter_path_prefix = "/fragile/${var.environment}/"
+
+  dora_snapshot_lambda_arn = module.lambda.function_arn
 }
 
 # ── Network ────────────────────────────────────────────────
@@ -90,6 +92,19 @@ module "rds" {
   db_password_secret_arn = module.secrets.db_password_secret_arn
 }
 
+# ── Lambda — DORA snapshot computation ─────────────────────
+module "lambda" {
+  source      = "../../modules/lambda"
+  environment = var.environment
+
+  vpc_id             = module.network.vpc_id
+  private_subnet_ids = module.network.private_subnet_ids
+  rds_endpoint       = module.rds.db_endpoint
+  rds_sg_id          = module.network.rds_security_group_id
+
+  db_password_secret_arn = module.secrets.db_password_secret_arn
+}
+
 # ── App Runner ─────────────────────────────────────────────
 module "apprunner" {
   source      = "../../modules/apprunner"
@@ -106,6 +121,9 @@ module "apprunner" {
   vpc_connector_arn = module.network.vpc_connector_arn
 
   rds_endpoint = module.rds.db_endpoint
+
+  dora_snapshot_lambda_name = module.lambda.function_name
+  aws_region                = var.aws_region
 
   db_password_secret_arn    = module.secrets.db_password_secret_arn
   jira_api_token_secret_arn = module.secrets.jira_api_token_secret_arn

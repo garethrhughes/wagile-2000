@@ -90,3 +90,13 @@ variable "frontend_url" {
   description = "The stable frontend custom domain URL (e.g. https://dashboard.example.com). Used for informational purposes."
   type        = string
 }
+
+variable "dora_snapshot_lambda_name" {
+  description = "Name of the DORA snapshot Lambda function. Injected as DORA_SNAPSHOT_LAMBDA_NAME env var."
+  type        = string
+}
+
+variable "aws_region" {
+  description = "AWS region. Injected as AWS_REGION env var on the backend service."
+  type        = string
+}

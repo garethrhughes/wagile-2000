@@ -41,3 +41,12 @@ a new ADR is created for the replacement decision.
 | [0027](0027-day-boundary-algorithm-uses-intl-binary-search.md) | Day-boundary algorithm uses `Intl.DateTimeFormat` with binary search | Accepted | 2026-04-15 |
 | [0028](0028-global-working-time-config-not-per-board.md) | Global working-time config singleton, not per-board | Accepted | 2026-04-15 |
 | [0029](0029-mit-license.md) | MIT License | Accepted | 2026-04-15 |
+| [0030](0030-multi-stage-docker-builds.md) | Multi-stage Docker builds for backend and frontend | Accepted | 2026-04-23 |
+| [0031](0031-nextjs-standalone-output.md) | Next.js standalone output mode | Accepted | 2026-04-23 |
+| [0032](0032-nodejs-heap-cap-and-apprunner-instance-sizing.md) | Node.js heap cap and App Runner instance sizing for memory management | Accepted | 2026-04-23 |
+| [0033](0033-cloudfront-as-public-entry-point.md) | CloudFront distributions as the public entry point for both services | Accepted | 2026-04-23 |
+| [0034](0034-cloudfront-waf-ip-allowlist.md) | CloudFront-scoped WAF IP allowlist as sole access-control layer | Accepted | 2026-04-23 |
+| [0035](0035-nat-gateway-for-apprunner-outbound-internet.md) | NAT Gateway for App Runner outbound internet access | Accepted | 2026-04-23 |
+| [0036](0036-sync-endpoint-fire-and-forget-http-202.md) | `POST /api/sync` as fire-and-forget returning HTTP 202 | Accepted | 2026-04-23 |
+| [0037](0037-typeorm-column-projection-for-metric-queries.md) | TypeORM column projection as standard pattern for metric service queries | Accepted | 2026-04-23 |
+| [0038](0038-frontend-health-endpoint.md) | Dedicated frontend health endpoint for App Runner health checks | Accepted | 2026-04-23 |
