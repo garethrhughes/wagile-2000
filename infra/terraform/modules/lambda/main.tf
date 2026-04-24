@@ -123,9 +123,9 @@ resource "aws_lambda_function" "dora_snapshot" {
   source_code_hash = filebase64sha256(local.lambda_zip_path)
 
   runtime     = "nodejs20.x"
-  handler     = "lambda/snapshot.handler.handler"
-  timeout     = 120
-  memory_size = 512
+  handler     = "lambda/index.handler"
+  timeout     = 300
+  memory_size = 1024
 
   lifecycle {
     precondition {

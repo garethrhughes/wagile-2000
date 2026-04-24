@@ -6,7 +6,7 @@ import {
   Index,
 } from 'typeorm';
 
-export type DoraSnapshotType = 'aggregate' | 'trend';
+export type DoraSnapshotType = 'aggregate' | 'trend' | 'trend-display';
 
 @Entity('dora_snapshots')
 @Index(['boardId'])

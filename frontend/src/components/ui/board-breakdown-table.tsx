@@ -10,7 +10,7 @@ import type { DoraMetricsBoardBreakdown } from '@/lib/api'
 // ---------------------------------------------------------------------------
 
 interface BoardBreakdownTableProps {
-  boardBreakdowns: DoraMetricsBoardBreakdown[]
+  boardBreakdowns: DoraMetricsBoardBreakdown[] | undefined
   period: { start: string; end: string }
 }
 
@@ -106,6 +106,7 @@ export function BoardBreakdownTable({
   )
 
   const rows = useMemo(() => {
+    if (!boardBreakdowns) return []
     const flat = boardBreakdowns.map(flattenBreakdown)
     return [...flat].sort((a, b) => {
       const aVal = a[sortKey]

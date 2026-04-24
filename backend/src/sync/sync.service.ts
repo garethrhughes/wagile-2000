@@ -51,6 +51,7 @@ const DEFAULT_FIELD_CONFIG: FieldConfig = {
 @Injectable()
 export class SyncService {
   private readonly logger = new Logger(SyncService.name);
+  private syncRunning = false;
 
   constructor(
     private readonly jiraClient: JiraClientService,
@@ -85,53 +86,77 @@ export class SyncService {
     await this.syncAll();
   }
 
+  get isSyncRunning(): boolean {
+    return this.syncRunning;
+  }
+
   async syncAll(): Promise<{ boards: string[]; results: SyncLog[] }> {
+    if (this.syncRunning) {
+      this.logger.warn('syncAll() called while a sync is already in progress — skipping to prevent concurrent runs.');
+      return { boards: [], results: [] };
+    }
+    this.syncRunning = true;
+
     const configs = await this.boardConfigRepo.find();
     const boardIds = configs.map((c) => c.boardId);
     const results: SyncLog[] = [];
 
-    // Load field config once for the entire sync run.
-    const fieldConfig = await this.loadFieldConfig();
-
-    for (const boardId of boardIds) {
-      const result = await this.syncBoard(boardId, fieldConfig);
-      results.push(result);
-    }
-
-    // Await snapshot invocation before syncRoadmaps to prevent concurrent heavy workloads.
-    for (const boardId of boardIds) {
-      await this.lambdaInvoker.invokeSnapshotWorker(boardId).catch((err: unknown) =>
-        this.logger.warn(
-          `Snapshot invocation failed for ${boardId}: ${err instanceof Error ? err.message : String(err)}`,
-        ),
-      );
-    }
-
     try {
-      await this.syncRoadmaps(fieldConfig);
-    } catch (error) {
-      this.logger.warn(
-        `syncRoadmaps failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+      // Load field config once for the entire sync run.
+      const fieldConfig = await this.loadFieldConfig();
 
-    // Auto-generate reports for any newly closed sprints (fire-and-forget,
-    // but sequential across boards to avoid peak memory pressure from running
-    // all boards' report generation concurrently on a fresh deployment).
-    const generateAllReports = async () => {
       for (const boardId of boardIds) {
-        await this.triggerSprintReportsForBoard(boardId).catch((err: unknown) =>
+        const result = await this.syncBoard(boardId, fieldConfig);
+        results.push(result);
+      }
+
+      // Invoke per-board Lambda snapshots sequentially and await each one
+      // (RequestResponse). This guarantees that all per-board dora_snapshots rows
+      // are written to the DB before the org-level invocation reads them.
+      for (const boardId of boardIds) {
+        await this.lambdaInvoker.invokeSnapshotWorker(boardId).catch((err: unknown) =>
           this.logger.warn(
-            `Sprint report trigger failed for ${boardId}: ${err instanceof Error ? err.message : String(err)}`,
+            `Snapshot invocation failed for ${boardId}: ${err instanceof Error ? err.message : String(err)}`,
           ),
         );
       }
-    };
-    generateAllReports().catch((err: unknown) =>
-      this.logger.warn(
-        `Sprint report generation failed: ${err instanceof Error ? err.message : String(err)}`,
-      ),
-    );
+
+      // Invoke the org-level snapshot once all per-board rows are confirmed written.
+      // The org handler reads per-board trend rows and merges them — no raw DB load.
+      await this.lambdaInvoker.invokeOrgSnapshot().catch((err: unknown) =>
+        this.logger.warn(
+          `Org snapshot invocation failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+
+      try {
+        await this.syncRoadmaps(fieldConfig);
+      } catch (error) {
+        this.logger.warn(
+          `syncRoadmaps failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
+      // Auto-generate reports for any newly closed sprints (fire-and-forget,
+      // but sequential across boards to avoid peak memory pressure from running
+      // all boards' report generation concurrently on a fresh deployment).
+      const generateAllReports = async () => {
+        for (const boardId of boardIds) {
+          await this.triggerSprintReportsForBoard(boardId).catch((err: unknown) =>
+            this.logger.warn(
+              `Sprint report trigger failed for ${boardId}: ${err instanceof Error ? err.message : String(err)}`,
+            ),
+          );
+        }
+      };
+      generateAllReports().catch((err: unknown) =>
+        this.logger.warn(
+          `Sprint report generation failed: ${err instanceof Error ? err.message : String(err)}`,
+        ),
+      );
+    } finally {
+      this.syncRunning = false;
+    }
 
     return { boards: boardIds, results };
   }

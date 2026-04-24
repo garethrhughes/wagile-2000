@@ -18,7 +18,7 @@ const mockSend = jest.fn().mockResolvedValue({});
 jest.mock('@aws-sdk/client-lambda', () => ({
   LambdaClient: jest.fn().mockImplementation(() => ({ send: mockSend })),
   InvokeCommand: jest.fn().mockImplementation((params: unknown) => params),
-  InvocationType: { Event: 'Event' },
+  InvocationType: { Event: 'Event', RequestResponse: 'RequestResponse' },
 }));
 
 function makeConfig(overrides: Record<string, string | undefined> = {}): ConfigService {
@@ -29,6 +29,8 @@ function makeConfig(overrides: Record<string, string | undefined> = {}): ConfigS
 
 function makeInProcessService(): jest.Mocked<InProcessSnapshotService> {
   return {
+    computeBoard: jest.fn().mockResolvedValue(undefined),
+    computeOrg: jest.fn().mockResolvedValue(undefined),
     computeAndPersist: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<InProcessSnapshotService>;
 }
@@ -43,7 +45,7 @@ describe('LambdaInvokerService', () => {
   });
 
   describe('when USE_LAMBDA=true and function name is set', () => {
-    it('sends an Event invocation to the configured function', async () => {
+    it('sends a RequestResponse invocation to the configured function', async () => {
       const config = makeConfig({
         USE_LAMBDA: 'true',
         DORA_SNAPSHOT_LAMBDA_NAME: 'fragile-dora-snapshot',
@@ -58,7 +60,7 @@ describe('LambdaInvokerService', () => {
       const [cmd] = mockSend.mock.calls[0] as [Record<string, unknown>];
       expect(cmd).toMatchObject({
         FunctionName: 'fragile-dora-snapshot',
-        InvocationType: 'Event',
+        InvocationType: 'RequestResponse',
       });
       expect(inProcess.computeAndPersist).not.toHaveBeenCalled();
     });
@@ -94,7 +96,7 @@ describe('LambdaInvokerService', () => {
   });
 
   describe('when USE_LAMBDA is not set (default local dev)', () => {
-    it('delegates to InProcessSnapshotService', async () => {
+    it('delegates to InProcessSnapshotService.computeBoard for per-board invocation', async () => {
       const config = makeConfig({
         USE_LAMBDA: undefined,
         DORA_SNAPSHOT_LAMBDA_NAME: undefined,
@@ -104,13 +106,14 @@ describe('LambdaInvokerService', () => {
 
       await service.invokeSnapshotWorker('ACC');
 
-      expect(inProcess.computeAndPersist).toHaveBeenCalledWith('ACC');
+      expect(inProcess.computeBoard).toHaveBeenCalledWith('ACC');
+      expect(inProcess.computeOrg).not.toHaveBeenCalled();
       expect(mockSend).not.toHaveBeenCalled();
     });
   });
 
   describe('when USE_LAMBDA=false', () => {
-    it('delegates to InProcessSnapshotService', async () => {
+    it('delegates to InProcessSnapshotService.computeBoard for per-board invocation', async () => {
       const config = makeConfig({
         USE_LAMBDA: 'false',
         DORA_SNAPSHOT_LAMBDA_NAME: 'fragile-dora-snapshot',
@@ -120,7 +123,23 @@ describe('LambdaInvokerService', () => {
 
       await service.invokeSnapshotWorker('ACC');
 
-      expect(inProcess.computeAndPersist).toHaveBeenCalledWith('ACC');
+      expect(inProcess.computeBoard).toHaveBeenCalledWith('ACC');
+      expect(inProcess.computeOrg).not.toHaveBeenCalled();
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it('delegates to InProcessSnapshotService.computeOrg for org invocation', async () => {
+      const config = makeConfig({
+        USE_LAMBDA: 'false',
+        DORA_SNAPSHOT_LAMBDA_NAME: 'fragile-dora-snapshot',
+      });
+      const inProcess = makeInProcessService();
+      const service = new LambdaInvokerService(config, inProcess);
+
+      await service.invokeOrgSnapshot();
+
+      expect(inProcess.computeOrg).toHaveBeenCalled();
+      expect(inProcess.computeBoard).not.toHaveBeenCalled();
       expect(mockSend).not.toHaveBeenCalled();
     });
   });

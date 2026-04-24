@@ -141,22 +141,34 @@ describe('snapshot Lambda handler', () => {
     );
   });
 
-  it('upserts four snapshot rows: per-board trend+aggregate and org trend+aggregate', async () => {
+  it('upserts two per-board snapshot rows (trend + aggregate) when boardId is a regular board', async () => {
     await handler({ boardId: 'BPT' });
     expect(mockUpsert).toHaveBeenCalledTimes(1);
     const [rows] = mockUpsert.mock.calls[0] as [
       Array<{ boardId: string; snapshotType: string }>,
       string[],
     ];
-    expect(rows).toHaveLength(4);
-    const boardRows = rows.filter((r) => r.boardId === 'BPT');
-    const orgRows   = rows.filter((r) => r.boardId === '__org__');
-    expect(boardRows).toHaveLength(2);
-    expect(orgRows).toHaveLength(2);
-    const boardTypes = boardRows.map((r) => r.snapshotType).sort();
-    expect(boardTypes).toEqual(['aggregate', 'trend']);
-    const orgTypes = orgRows.map((r) => r.snapshotType).sort();
-    expect(orgTypes).toEqual(['aggregate', 'trend']);
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.boardId === 'BPT')).toBe(true);
+    const types = rows.map((r) => r.snapshotType).sort();
+    expect(types).toEqual(['aggregate', 'trend', 'trend-display']);
+  });
+
+  it('upserts two org-level snapshot rows when orgSnapshot=true', async () => {
+    mockGetRepository.mockReturnValue({
+      upsert: mockUpsert,
+      find: jest.fn().mockResolvedValue([{ boardId: 'ACC' }, { boardId: 'BPT' }]),
+    });
+    await handler({ boardId: '__org__', orgSnapshot: true });
+    expect(mockUpsert).toHaveBeenCalledTimes(1);
+    const [rows] = mockUpsert.mock.calls[0] as [
+      Array<{ boardId: string; snapshotType: string }>,
+      string[],
+    ];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.boardId === '__org__')).toBe(true);
+    const types = rows.map((r) => r.snapshotType).sort();
+    expect(types).toEqual(['aggregate', 'trend']);
   });
 
   it('calls all four metric services with the loaded slice', async () => {

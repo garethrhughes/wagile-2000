@@ -7,27 +7,32 @@
 
 # ── Required (no defaults) ─────────────────────────────────────────────────
 
-# Your root domain name. A Route 53 hosted zone for this domain must already
+# IPv4 CIDRs allowed through WAF. All other traffic receives HTTP 403.
+# Must be /32 for single IPs. Add entries for each VPN egress address.
+allowed_cidrs = ["0.0.0.0/32"]  # replace with real VPN egress IP(s)
+
+# Root domain name. A Route 53 hosted zone for this domain must already
 # exist in the target AWS account. Terraform will look it up via a data source
 # and will NOT create a new zone.
-#   Example: domain_name = "example.com"
-domain_name = "example.com"
+#   Example: domain_name = "ops.mypassglobal.com"
+domain_name = "ops.mypassglobal.com"
 
 # ── Optional (sensible defaults provided) ──────────────────────────────────
 
-# AWS region. Default: ap-southeast-2 (Sydney)
+# AWS region. Default: ap-southeast-2 (Sydney). Must match the region where the
+# S3 state bucket and DynamoDB lock table were created.
 # aws_region = "ap-southeast-2"
 
 # Environment label used in resource names and tags. Default: prod
 # environment = "prod"
 
 # Subdomain for the frontend. Resolves to <frontend_subdomain>.<domain_name>.
-# Default: dashboard  →  dashboard.example.com
-# frontend_subdomain = "dashboard"
+# Example: fragile  →  fragile.ops.mypassglobal.com
+# frontend_subdomain = "fragile"
 
 # Subdomain for the backend API. Resolves to <backend_subdomain>.<domain_name>.
-# Default: api  →  api.example.com
-# backend_subdomain = "api"
+# Example: fragile-api  →  fragile-api.ops.mypassglobal.com
+# backend_subdomain = "fragile-api"
 
 # ECR image tags. Updated automatically by CI on each push to main.
 # Set manually here only for one-off deploys of a specific image.
@@ -57,7 +62,7 @@ domain_name = "example.com"
 #
 #   /fragile/prod/jira-base-url   — e.g. https://your-org.atlassian.net
 #   /fragile/prod/jira-email      — e.g. your-jira-user@example.com
-#   /fragile/prod/frontend-url    — e.g. https://dashboard.example.com
+#   /fragile/prod/frontend-url    — e.g. https://fragile.ops.mypassglobal.com
 #   /fragile/prod/app-timezone    — e.g. Australia/Sydney (already defaulted)
 #
 # Use the AWS Console (Systems Manager → Parameter Store) or:

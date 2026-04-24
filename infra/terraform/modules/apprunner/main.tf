@@ -122,13 +122,19 @@ resource "aws_apprunner_service" "frontend" {
         port = "3000"
 
         runtime_environment_variables = {
-          NODE_ENV            = "production"
-          NEXT_PUBLIC_API_URL = var.backend_url
+          NODE_ENV = "production"
+          # NEXT_PUBLIC_API_URL is intentionally absent here.
+          # Next.js bakes NEXT_PUBLIC_* variables into the JS bundle at docker
+          # build time. A runtime env var has no effect — the correct URL must
+          # be passed as a --build-arg to `docker build` via `make ecr-push` /
+          # `scripts/ecr-push.sh`, which reads it from `terraform output
+          # backend_service_url`.
+          #
           # Force Next.js standalone server to bind on all interfaces.
           # App Runner's container runtime sets HOSTNAME to the internal EC2
           # hostname, overriding the Dockerfile ENV. Explicitly setting it here
           # takes precedence and ensures the health checker can reach the server.
-          HOSTNAME            = "0.0.0.0"
+          HOSTNAME = "0.0.0.0"
         }
       }
     }

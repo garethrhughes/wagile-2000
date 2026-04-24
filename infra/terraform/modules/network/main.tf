@@ -150,32 +150,43 @@ resource "aws_security_group" "apprunner_connector" {
 }
 
 # ── Security group: RDS ───────────────────────────────────────────────────────
-# Inbound PostgreSQL only from the App Runner VPC connector SG.
+# Rules are managed as standalone aws_security_group_rule resources below so
+# that external modules (e.g. lambda) can add their own rules without causing
+# Terraform to fight over the inline ingress/egress lists.
 
 resource "aws_security_group" "rds" {
   name        = "fragile-rds-sg"
   description = "Allow inbound PostgreSQL from the App Runner VPC connector only."
   vpc_id      = aws_vpc.main.id
 
-  ingress {
-    description     = "PostgreSQL from App Runner VPC connector"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.apprunner_connector.id]
-  }
-
-  egress {
-    description = "Allow all outbound (for RDS patch downloads etc.)"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # Inline ingress/egress intentionally omitted — all rules are managed as
+  # separate aws_security_group_rule resources. Mixing inline blocks with
+  # standalone rules causes Terraform to remove externally-added rules on
+  # every apply.
 
   tags = {
     Name = "fragile-rds-sg"
   }
+}
+
+resource "aws_security_group_rule" "rds_ingress_apprunner" {
+  type                     = "ingress"
+  description              = "PostgreSQL from App Runner VPC connector"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.apprunner_connector.id
+  security_group_id        = aws_security_group.rds.id
+}
+
+resource "aws_security_group_rule" "rds_egress_all" {
+  type              = "egress"
+  description       = "Allow all outbound (for RDS patch downloads etc.)"
+  from_port         = 0
+  to_port           = 0
+  protocol          = "-1"
+  cidr_blocks       = ["0.0.0.0/0"]
+  security_group_id = aws_security_group.rds.id
 }
 
 # ── App Runner VPC connector ──────────────────────────────────────────────────
