@@ -52,19 +52,16 @@ export class InProcessSnapshotService {
   /** Compute and persist only the per-board snapshot rows for a single board. */
   async computeBoard(boardId: string): Promise<void> {
     const currentQuarter = listRecentQuarters(1)[0].label;
-    const quarters = listRecentQuarters(TREND_QUARTERS);
 
     const [boardAggregate, boardTrend] = await Promise.all([
       this.metricsService.getDoraAggregate({ boardId, quarter: currentQuarter }),
       this.metricsService.getDoraTrend({ boardId, limit: TREND_QUARTERS }),
     ]);
 
-    // trend-display: one OrgDoraResult per quarter (oldest→newest) — the
-    // display-ready shape read by the frontend trend endpoint for per-board views.
-    const trendDisplayItems = await Promise.all(
-      quarters.map((q) => this.metricsService.getDoraAggregate({ boardId, quarter: q.label })),
-    );
-    const trendDisplay = trendDisplayItems.reverse(); // oldest → newest
+    // trend-display: getDoraTrend already returns OrgDoraResult[] (oldest→newest),
+    // which is exactly the display-ready shape the frontend trend endpoint reads
+    // for per-board views. Reuse it directly to avoid redundant DB queries.
+    const trendDisplay = boardTrend;
 
     await this.snapshotRepo.upsert(
       [

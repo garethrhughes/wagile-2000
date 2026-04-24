@@ -109,11 +109,11 @@ export class SyncService {
     const qr = this.dataSource.createQueryRunner();
     await qr.connect();
     try {
-      const [row] = await qr.query<[{ pg_try_advisory_lock: boolean }]>(
+      const rows = await qr.query<{ pg_try_advisory_lock: boolean }[]>(
         'SELECT pg_try_advisory_lock($1)',
         [SyncService.SYNC_LOCK_KEY],
       );
-      if (row.pg_try_advisory_lock) {
+      if (rows[0].pg_try_advisory_lock) {
         this.syncLockRunner = qr;
         return true;
       }
