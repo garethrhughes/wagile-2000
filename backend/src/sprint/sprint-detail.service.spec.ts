@@ -216,6 +216,118 @@ describe('SprintDetailService', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Carry-over issue classification (proposal 0038)
+  // ---------------------------------------------------------------------------
+
+  it('classifies carry-over issues as committed, not mid-sprint additions', async () => {
+    // Sprint starts at noon; previous sprint is completed at 3pm on the same day.
+    // ACC-2 was in Sprint 0 and carries over to Sprint 1 at 3pm.
+    // ACC-3 is a genuine mid-sprint addition from the backlog (fromValue = null).
+    const sprint: JiraSprint = {
+      ...SPRINT,
+      startDate: new Date('2026-01-05T12:00:00Z'),
+      endDate: new Date('2026-01-19T00:00:00Z'),
+    };
+    sprintRepo.findOne.mockResolvedValue(sprint);
+    boardConfigRepo.findOne.mockResolvedValue({
+      boardId: 'ACC',
+      boardType: 'scrum',
+      doneStatusNames: ['Done'],
+      failureIssueTypes: [],
+      failureLabels: [],
+      incidentIssueTypes: [],
+      incidentLabels: [],
+      cancelledStatusNames: ['Cancelled'],
+    } as unknown as BoardConfig);
+
+    issueRepo.find.mockResolvedValue([
+      {
+        key: 'ACC-1',
+        boardId: 'ACC',
+        issueType: 'Story',
+        summary: 'Committed from start',
+        status: 'To Do',
+        sprintId: 'sprint-1',
+        epicKey: null,
+        labels: [],
+        points: null,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+      } as unknown as JiraIssue,
+      {
+        key: 'ACC-2',
+        boardId: 'ACC',
+        issueType: 'Story',
+        summary: 'Carry-over from Sprint 0',
+        status: 'To Do',
+        sprintId: 'sprint-1',
+        epicKey: null,
+        labels: [],
+        points: null,
+        createdAt: new Date('2025-12-01T00:00:00Z'),
+      } as unknown as JiraIssue,
+      {
+        key: 'ACC-3',
+        boardId: 'ACC',
+        issueType: 'Story',
+        summary: 'Genuine mid-sprint addition',
+        status: 'To Do',
+        sprintId: 'sprint-1',
+        epicKey: null,
+        labels: [],
+        points: null,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+      } as unknown as JiraIssue,
+    ]);
+    roadmapConfigRepo.find.mockResolvedValue([]);
+
+    let qbCallCount = 0;
+    changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+      qbCallCount++;
+      if (qbCallCount === 1) {
+        // Sprint-field changelogs
+        return makeQb([
+          // ACC-1: added before sprint start
+          {
+            issueKey: 'ACC-1',
+            field: 'Sprint',
+            toValue: 'Sprint 1',
+            fromValue: null,
+            changedAt: new Date('2026-01-04T10:00:00Z'),
+          },
+          // ACC-2: carry-over at 3pm (fromValue = 'Sprint 0' → committed)
+          {
+            issueKey: 'ACC-2',
+            field: 'Sprint',
+            toValue: 'Sprint 1',
+            fromValue: 'Sprint 0',
+            changedAt: new Date('2026-01-05T15:00:00Z'),
+          },
+          // ACC-3: genuine addition at 3pm (fromValue = null → added)
+          {
+            issueKey: 'ACC-3',
+            field: 'Sprint',
+            toValue: 'Sprint 1',
+            fromValue: null,
+            changedAt: new Date('2026-01-05T15:00:00Z'),
+          },
+        ]);
+      }
+      // Status and link changelogs
+      return makeQb([]);
+    });
+
+    const result = await service.getDetail('ACC', 'sprint-1');
+
+    expect(result.summary.committedCount).toBe(2);       // ACC-1 + ACC-2
+    expect(result.summary.addedMidSprintCount).toBe(1);  // ACC-3 only
+
+    const acc2 = result.issues.find((i) => i.key === 'ACC-2');
+    const acc3 = result.issues.find((i) => i.key === 'ACC-3');
+    expect(acc2?.addedMidSprint).toBe(false);
+    expect(acc3?.addedMidSprint).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
   // Cancelled status handling including "Won't Do"
   // ---------------------------------------------------------------------------
 

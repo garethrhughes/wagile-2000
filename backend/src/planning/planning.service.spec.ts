@@ -244,6 +244,192 @@ describe('PlanningService', () => {
       expect(result[0].added).toBe(1);
       expect(result[0].scopeChangePercent).toBe(100); // (1+0)/1 * 100
     });
+
+    it('should classify carry-over issues as committed, not added', async () => {
+      // Scenario: sprint starts at 12:00pm; previous sprint is completed at 3:00pm
+      // on the same day. The carry-over issues have fromValue = 'Sprint 1' because
+      // they were moved via Jira's "Complete Sprint" operation.
+      const sprint: JiraSprint = {
+        id: 'sprint-2',
+        name: 'Sprint 2',
+        boardId: 'ACC',
+        state: 'active',
+        startDate: new Date('2025-02-01T12:00:00Z'),
+        endDate: new Date('2025-02-15T00:00:00Z'),
+        goal: '',
+      } as JiraSprint;
+
+      sprintRepo.find
+        .mockResolvedValueOnce([sprint])  // active sprints
+        .mockResolvedValueOnce([]);       // closed sprints
+
+      issueRepo.find.mockResolvedValue([
+        // Committed at sprint start
+        {
+          key: 'ACC-1',
+          sprintId: 'sprint-2',
+          status: 'In Progress',
+          boardId: 'ACC',
+          issueType: 'Story',
+          points: null,
+          createdAt: new Date('2025-01-01'),
+        },
+        // Carry-over: was in Sprint 1, moved at 3:00pm when Sprint 1 completed
+        {
+          key: 'ACC-2',
+          sprintId: 'sprint-2',
+          status: 'To Do',
+          boardId: 'ACC',
+          issueType: 'Story',
+          points: null,
+          createdAt: new Date('2025-01-01'),
+        },
+        // Genuine mid-sprint addition from backlog
+        {
+          key: 'ACC-3',
+          sprintId: 'sprint-2',
+          status: 'To Do',
+          boardId: 'ACC',
+          issueType: 'Story',
+          points: null,
+          createdAt: new Date('2025-01-01'),
+        },
+      ] as unknown as JiraIssue[]);
+
+      let qbCallCount = 0;
+      changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+        qbCallCount++;
+        const qb = {
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          getMany: jest.fn(),
+        };
+
+        if (qbCallCount === 1) {
+          qb.getMany.mockResolvedValue([
+            // ACC-1: added before sprint start (committed)
+            {
+              issueKey: 'ACC-1',
+              field: 'Sprint',
+              toValue: 'Sprint 2',
+              fromValue: null,
+              changedAt: new Date('2025-01-30T10:00:00Z'),
+            },
+            // ACC-2: carry-over at 3pm (fromValue = 'Sprint 1' → committed)
+            {
+              issueKey: 'ACC-2',
+              field: 'Sprint',
+              toValue: 'Sprint 2',
+              fromValue: 'Sprint 1',
+              changedAt: new Date('2025-02-01T15:00:00Z'),
+            },
+            // ACC-3: genuine addition at 3pm (fromValue = null → added)
+            {
+              issueKey: 'ACC-3',
+              field: 'Sprint',
+              toValue: 'Sprint 2',
+              fromValue: null,
+              changedAt: new Date('2025-02-01T15:00:00Z'),
+            },
+          ]);
+        } else {
+          qb.getMany.mockResolvedValue([]);
+        }
+        return qb;
+      });
+
+      const result = await service.getAccuracy('ACC');
+
+      expect(result[0].commitment).toBe(2); // ACC-1 + ACC-2
+      expect(result[0].added).toBe(1);      // ACC-3 only
+      expect(result[0].removed).toBe(0);
+      // scopeChangePercent = (1 + 0) / 2 * 100 = 50
+      expect(result[0].scopeChangePercent).toBe(50);
+    });
+
+    it('should treat issues added within the 5-minute grace period as committed', async () => {
+      // Regression guard: issues whose Sprint changelog falls within 5 minutes of
+      // startDate should be classified as committed (original commitment), not added.
+      // This covers Jira's bulk-add delay when a sprint is started.
+      const sprintStart = new Date('2025-03-01T10:00:00Z');
+      const sprint: JiraSprint = {
+        id: 'sprint-3',
+        name: 'Sprint 3',
+        boardId: 'ACC',
+        state: 'closed',
+        startDate: sprintStart,
+        endDate: new Date('2025-03-15T00:00:00Z'),
+        goal: '',
+      } as JiraSprint;
+
+      sprintRepo.find
+        .mockResolvedValueOnce([])           // active sprints
+        .mockResolvedValueOnce([sprint]);    // closed sprints
+
+      issueRepo.find.mockResolvedValue([
+        // Added 90 seconds after startDate — within 5-minute grace → committed
+        {
+          key: 'ACC-20',
+          sprintId: 'sprint-3',
+          status: 'To Do',
+          boardId: 'ACC',
+          issueType: 'Story',
+          points: null,
+          createdAt: new Date('2025-01-01'),
+        },
+        // Added 10 minutes after startDate — outside grace → added
+        {
+          key: 'ACC-21',
+          sprintId: 'sprint-3',
+          status: 'To Do',
+          boardId: 'ACC',
+          issueType: 'Story',
+          points: null,
+          createdAt: new Date('2025-01-01'),
+        },
+      ] as unknown as JiraIssue[]);
+
+      let qbCallCount = 0;
+      changelogRepo.createQueryBuilder = jest.fn().mockImplementation(() => {
+        qbCallCount++;
+        const qb = {
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          getMany: jest.fn(),
+        };
+
+        if (qbCallCount === 1) {
+          qb.getMany.mockResolvedValue([
+            // ACC-20: changelog 90 seconds after start → within grace → committed
+            {
+              issueKey: 'ACC-20',
+              field: 'Sprint',
+              toValue: 'Sprint 3',
+              fromValue: null,
+              changedAt: new Date(sprintStart.getTime() + 90 * 1000),
+            },
+            // ACC-21: changelog 10 minutes after start → outside grace → added
+            {
+              issueKey: 'ACC-21',
+              field: 'Sprint',
+              toValue: 'Sprint 3',
+              fromValue: null,
+              changedAt: new Date(sprintStart.getTime() + 10 * 60 * 1000),
+            },
+          ]);
+        } else {
+          qb.getMany.mockResolvedValue([]);
+        }
+        return qb;
+      });
+
+      const result = await service.getAccuracy('ACC');
+
+      expect(result[0].commitment).toBe(1); // ACC-20 only
+      expect(result[0].added).toBe(1);      // ACC-21 only
+    });
   });
 
   describe('getSprints', () => {

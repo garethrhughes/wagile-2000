@@ -50,3 +50,4 @@ a new ADR is created for the replacement decision.
 | [0036](0036-sync-endpoint-fire-and-forget-http-202.md) | `POST /api/sync` as fire-and-forget returning HTTP 202 | Accepted | 2026-04-23 |
 | [0037](0037-typeorm-column-projection-for-metric-queries.md) | TypeORM column projection as standard pattern for metric service queries | Accepted | 2026-04-23 |
 | [0038](0038-frontend-health-endpoint.md) | Dedicated frontend health endpoint for App Runner health checks | Accepted | 2026-04-23 |
+| [0039](0039-carry-over-sprint-issue-classification.md) | Carry-over sprint issues classified as committed, not added | Accepted | 2026-04-24 |

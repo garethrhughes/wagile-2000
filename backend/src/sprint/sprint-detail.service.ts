@@ -344,6 +344,10 @@ export class SprintDetailService {
 
         let inSprintAtEnd = wasAtStart || createdMidSprint;
         let wasAddedDuringSprint = createdMidSprint;
+        // Carry-overs from a previous sprint are treated as committed, not added.
+        // See proposal 0038: when fromValue contains a different sprint name, the
+        // issue was moved via Jira's "Complete Sprint" carry-over flow.
+        let wasCarryOver = false;
 
         for (const cl of logs) {
           if (cl.changedAt <= sprintStart) continue;
@@ -351,7 +355,11 @@ export class SprintDetailService {
 
           if (sprintValueContains(cl.toValue, sprintName)) {
             if (!inSprintAtEnd && !wasAtStart) {
-              wasAddedDuringSprint = true;
+              if (isCarryOverFromSprint(cl.fromValue, sprintName)) {
+                wasCarryOver = true;
+              } else {
+                wasAddedDuringSprint = true;
+              }
             }
             inSprintAtEnd = true;
           }
@@ -363,7 +371,7 @@ export class SprintDetailService {
           }
         }
 
-        if (wasAtStart) {
+        if (wasAtStart || wasCarryOver) {
           committedKeys.add(issueKey);
           if (!inSprintAtEnd) {
             removedKeys.add(issueKey);
@@ -698,6 +706,29 @@ function sprintValueContains(
 ): boolean {
   if (!value) return false;
   return value.split(',').some((s) => s.trim() === sprintName);
+}
+
+/**
+ * Returns true when a Sprint-field changelog `fromValue` indicates that the
+ * issue was carried over from a different sprint — i.e. it was moved from
+ * another sprint into the current one rather than added from the backlog.
+ *
+ * When Jira's "Complete Sprint" carry-over runs, the changelog entry has:
+ *   fromValue: "<previous sprint name>"
+ *   toValue:   "<current sprint name>"
+ *
+ * A backlog addition has fromValue = null or "".
+ * See proposal 0038.
+ */
+function isCarryOverFromSprint(
+  fromValue: string | null,
+  currentSprintName: string,
+): boolean {
+  if (!fromValue) return false;
+  return fromValue.split(',').some((s) => {
+    const name = s.trim();
+    return name !== '' && name !== currentSprintName;
+  });
 }
 
 /**

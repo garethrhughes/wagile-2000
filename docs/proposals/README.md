@@ -39,3 +39,4 @@
 | [0035](0035-ux-review-and-improvements.md) | UX Review and Improvements | Draft | 2026-04-16 |
 | [0036](0036-dora-page-reliability-options.md) | DORA Page Reliability in AWS Environment: Options Analysis (revised — OOM constraint) | Draft | 2026-04-23 |
 | [0037](0037-lambda-post-sync-dora-computation.md) | Lambda Post-Sync DORA Snapshot Computation | Draft | 2026-04-23 |
+| [0038](0038-carry-over-sprint-issue-classification.md) | Carry-Over Sprint Issue Classification Fix | Accepted | 2026-04-24 |
