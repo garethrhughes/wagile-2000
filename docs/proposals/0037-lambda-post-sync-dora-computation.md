@@ -826,65 +826,56 @@ infra/terraform/modules/lambda/
 #### `infra/terraform/modules/lambda/main.tf`
 
 The implemented Terraform module diverges from the original S3-based design in one important
-way: **the zip is built locally by a `null_resource` provisioner and deployed directly from
-disk** (no S3 bucket). This simplifies local Terraform runs — the zip is produced by the
-same `terraform apply` that deploys the function, via `local-exec`.
+way: **the zip is built by `make lambda-build` and deployed directly from disk** (no S3
+bucket). This separates build concerns from infrastructure concerns — Terraform only deploys
+a zip that already exists; it does not build it.
 
 Key implementation details that differ from the original design:
 
-**Zip layout:** The zip is built as follows:
+**Build step moved to Makefile:** `null_resource` + `local-exec` was removed because
+`filebase64sha256()` is evaluated at plan time, before any provisioner runs. On a clean
+checkout the zip does not exist yet, so the hash bakes in as `""` and Terraform wants to
+re-update the function on every subsequent plan (two-apply problem). The `make lambda-build`
+target produces the zip at a deterministic path before `terraform apply` is invoked:
+```
+make lambda-build   # compile + package
+make tf-apply       # deploy (zip already present, hash is real)
+# or:
+make deploy         # chains both
+```
+
+**Zip location:** The zip is written to `backend/snapshot-worker.zip` — intentionally
+**outside** `backend/dist/` so that `nest build` (which sets `deleteOutDir: true`) cannot
+delete it on the next compile.
+
+**Zip layout:**
 ```bash
-cd backend/dist
-zip -r ../dist/snapshot-worker.zip .    # dist/ contents at root of zip
-cd ../../backend
-zip -r dist/snapshot-worker.zip node_modules/   # node_modules at root alongside dist content
+# From Makefile lambda-build target:
+cd backend/dist && zip -r ../../backend/snapshot-worker.zip . --quiet
+cd /tmp/lambda-node-modules && zip -r $CURDIR/backend/snapshot-worker.zip node_modules/ --quiet
 ```
 This places compiled JS at the root of the zip (e.g. `lambda/snapshot.handler.js`) matching
-the Lambda handler path `lambda/snapshot.handler.handler`. The original proposal had an
-incorrect `cd dist` → `zip` command that would have nested everything under a `dist/`
-prefix inside the zip.
+the Lambda handler path `lambda/snapshot.handler.handler`.
 
-**`source_code_hash` guard:** The `filebase64sha256()` call is wrapped in a `fileexists()`
-guard to prevent `terraform plan` failing on a clean checkout before the zip is built:
+**Production deps only:** `npm ci --omit=dev` is used for the Lambda runtime install,
+keeping the zip well under Lambda's 250 MB unzipped limit.
+
+**`source_code_hash` guard:** The `filebase64sha256()` call is still wrapped in a
+`fileexists()` guard to degrade gracefully if someone runs `terraform plan` before
+`make lambda-build`:
 ```hcl
 source_code_hash = fileexists(local.lambda_zip_path) ? filebase64sha256(local.lambda_zip_path) : ""
 ```
 
-**Build trigger:** A `null_resource` with `triggers.source_hash` (sha256 of all `.ts` files
-in `backend/src/` plus `package-lock.json`) ensures the build only reruns when relevant
-source code changes.
-
 **No S3 bucket:** The original proposal recommended an S3-based deployment. At current scale
-the direct-zip approach is simpler and avoids managing an S3 bucket. If the CI pipeline moves
-to GitHub Actions with `terraform apply` running in a clean container, revisit S3 deployment
-(the Terraform `s3_bucket` / `s3_key` attributes can replace `filename` without other changes).
+the direct-zip approach is simpler and avoids managing an S3 bucket. If CI moves to GitHub
+Actions with `terraform apply` running in a clean container, revisit S3 deployment (the
+`s3_bucket` / `s3_key` attributes can replace `filename` without other changes).
 
 ```hcl
 locals {
   repo_root       = "${path.module}/../../../.."
-  lambda_zip_path = "${local.repo_root}/backend/dist/snapshot-worker.zip"
-  source_hash = sha256(join("", concat(
-    [for f in sort(fileset("${local.repo_root}/backend/src", "**/*.ts")) :
-      filesha256("${local.repo_root}/backend/src/${f}")],
-    [filesha256("${local.repo_root}/backend/package-lock.json")],
-  )))
-}
-
-resource "null_resource" "build_lambda" {
-  triggers = { source_hash = local.source_hash }
-  provisioner "local-exec" {
-    working_dir = local.repo_root
-    command     = <<-EOT
-      set -e
-      npm ci --prefix backend
-      npm run build --prefix backend
-      rm -f backend/dist/snapshot-worker.zip
-      cd backend/dist
-      zip -r ../dist/snapshot-worker.zip . --quiet
-      cd ../../backend
-      zip -r dist/snapshot-worker.zip node_modules/ --quiet
-    EOT
-  }
+  lambda_zip_path = "${local.repo_root}/backend/snapshot-worker.zip"
 }
 
 resource "aws_lambda_function" "dora_snapshot" {
@@ -911,7 +902,6 @@ resource "aws_lambda_function" "dora_snapshot" {
       DB_PASSWORD_SECRET_ARN = var.db_password_secret_arn
     }
   }
-  depends_on = [null_resource.build_lambda]
 }
 ```
 
@@ -1058,18 +1048,20 @@ output "vpc_id" { value = aws_vpc.main.id }
 
 #### Build
 
-The Lambda is built and packaged by the Terraform `null_resource` provisioner on each
-`terraform apply`. No separate CI step is required for the Lambda package — `npm ci` +
-`npm run build` + `zip` are all executed by `local-exec` on the machine running `terraform apply`.
+The Lambda is built and packaged by `make lambda-build` before `terraform apply`. The
+`make deploy` target chains both steps. No separate CI step is required for the Lambda
+package at current scale — `npm ci --omit=dev` + `npm run build` + `zip` are executed
+locally on the machine running the deploy.
 
-The zip is produced at `backend/dist/snapshot-worker.zip`:
+The zip is produced at `backend/snapshot-worker.zip` (outside `dist/` to survive
+`nest build`'s `deleteOutDir`):
 ```
-backend/dist/snapshot-worker.zip
+backend/snapshot-worker.zip
   lambda/snapshot.handler.js     ← compiled handler
   lambda/in-process-snapshot.service.js
   metrics/                       ← metric services
   database/entities/             ← TypeORM entities
-  node_modules/                  ← production deps
+  node_modules/                  ← production deps only (--omit=dev)
   ...
 ```
 
@@ -1078,8 +1070,8 @@ The Lambda handler path in the zip is `lambda/snapshot.handler.js`, matching the
 
 #### Deployment
 
-`terraform apply` builds and deploys in one step. `source_code_hash` ensures Lambda only
-updates when the zip content changes.
+`make lambda-build && terraform apply` (or `make deploy`) builds and deploys. `source_code_hash`
+ensures Lambda only updates when the zip content changes.
 
 If CI moves to GitHub Actions with `terraform apply` running in a clean container, the
 direct-zip approach continues to work (Node.js is available in the standard Actions runner).

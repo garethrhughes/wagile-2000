@@ -1,55 +1,28 @@
-# ── Build Lambda zip as part of terraform apply ──────────────────────────────
-# The null_resource reruns whenever any TypeScript source file under
-# backend/src/lambda/ changes (tracked via sha256 hash of all source files).
-# It compiles the backend and produces the zip at a deterministic path.
+# ── Lambda zip path ───────────────────────────────────────────────────────────
+# The zip is produced by `make lambda-build` (see Makefile) and placed at
+# backend/snapshot-worker.zip — intentionally outside backend/dist/ so that
+# `nest build` (which sets deleteOutDir: true) cannot delete it.
 #
-# Requires: node, npm available on the machine running terraform apply.
+# Run `make lambda-build` before `terraform apply` whenever backend source
+# changes. The `deploy` Make target chains both steps.
+#
+# Why not null_resource + local-exec?
+#   Terraform evaluates filebase64sha256() at plan time, before any
+#   provisioner runs. On a clean checkout the zip does not yet exist so the
+#   hash bakes in as "" and Terraform re-plans an update on every subsequent
+#   run. Moving the build step outside Terraform eliminates this two-apply
+#   problem and keeps infra concerns separate from build concerns.
 
 locals {
   # Resolve path to the repo root relative to this module file.
   # The module lives at infra/terraform/modules/lambda/ — four levels up.
   repo_root = "${path.module}/../../../.."
 
-  lambda_zip_path = "${local.repo_root}/backend/dist/snapshot-worker.zip"
+  lambda_zip_path = "${local.repo_root}/backend/snapshot-worker.zip"
 
-  # Hash of all Lambda source files — used as the null_resource trigger so
-  # the build only reruns when relevant source code changes.
-  source_hash = sha256(join("", concat(
-    [
-      for f in sort(fileset("${local.repo_root}/backend/src", "**/*.ts")) :
-      filesha256("${local.repo_root}/backend/src/${f}")
-    ],
-    [filesha256("${local.repo_root}/backend/package-lock.json")],
-  )))
-}
-
-resource "null_resource" "build_lambda" {
-  triggers = {
-    source_hash = local.source_hash
-  }
-
-  provisioner "local-exec" {
-    working_dir = local.repo_root
-    command     = <<-EOT
-      set -e
-
-      echo "==> Installing backend dependencies..."
-      npm ci --prefix backend
-
-      echo "==> Compiling TypeScript..."
-      npm run build --prefix backend
-
-      echo "==> Packaging Lambda zip..."
-      rm -f backend/dist/snapshot-worker.zip
-      cd backend/dist
-      zip -r ../dist/snapshot-worker.zip . --quiet
-      cd ../../backend
-      zip -r dist/snapshot-worker.zip node_modules/ --quiet
-      cd ..
-
-      echo "==> Lambda zip ready at backend/dist/snapshot-worker.zip"
-    EOT
-  }
+  # SHA-256 of the committed placeholder zip. Used by the lifecycle precondition
+  # to block `terraform apply` if `make lambda-build` has not been run yet.
+  placeholder_zip_sha256 = "e324883d18fd881375cc50e31c43b21efc4cd3ba1c3d37f16807ce8ade7834cd"
 }
 
 # ── Lambda execution role ────────────────────────────────────────────────────
@@ -134,6 +107,12 @@ resource "aws_security_group_rule" "rds_from_lambda" {
 # ── Lambda function ──────────────────────────────────────────────────────────
 # Deployed directly from the local zip file — no S3 bucket required.
 # source_code_hash forces an update whenever the zip content changes.
+#
+# IMPORTANT: Run `make lambda-build` before `terraform apply` whenever backend
+# source changes. The `deploy` Make target chains both steps. A committed
+# placeholder zip (backend/snapshot-worker.zip) allows `terraform plan` to
+# succeed on a clean checkout; the lifecycle precondition below blocks apply
+# if the placeholder has not been replaced by a real build.
 
 resource "aws_lambda_function" "dora_snapshot" {
   function_name = "fragile-dora-snapshot"
@@ -141,12 +120,19 @@ resource "aws_lambda_function" "dora_snapshot" {
   package_type  = "Zip"
 
   filename         = local.lambda_zip_path
-  source_code_hash = fileexists(local.lambda_zip_path) ? filebase64sha256(local.lambda_zip_path) : ""
+  source_code_hash = filebase64sha256(local.lambda_zip_path)
 
   runtime     = "nodejs20.x"
   handler     = "lambda/snapshot.handler.handler"
   timeout     = 120
   memory_size = 512
+
+  lifecycle {
+    precondition {
+      condition     = filesha256(local.lambda_zip_path) != local.placeholder_zip_sha256
+      error_message = "backend/snapshot-worker.zip is the committed placeholder. Run 'make lambda-build' before 'terraform apply'."
+    }
+  }
 
   vpc_config {
     subnet_ids         = var.private_subnet_ids
@@ -168,6 +154,4 @@ resource "aws_lambda_function" "dora_snapshot" {
   }
 
   tags = { Name = "fragile-dora-snapshot" }
-
-  depends_on = [null_resource.build_lambda]
 }
