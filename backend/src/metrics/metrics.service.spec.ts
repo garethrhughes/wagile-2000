@@ -383,6 +383,7 @@ describe('MetricsService', () => {
         boardId: 'ACC',
       });
       expect(result.period.start).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(result.period.label).toMatch(/^\d{4}-Q\d$/);
     });
   });
 
@@ -396,14 +397,14 @@ describe('MetricsService', () => {
       // Should have 3 points (one per quarter), oldest first
       expect(points).toHaveLength(3);
       // Oldest start should be earlier than newest
-      const starts = points.map((p) => new Date(p.start).getTime());
+      const starts = points.map((p) => new Date(p.period.start).getTime());
       expect(starts[0]).toBeLessThan(starts[starts.length - 1]);
     });
 
     it('returns trend points for a single board (quarter mode only)', async () => {
       const points = await service.getDoraTrend({ boardId: 'ACC', limit: 2 });
       expect(points).toHaveLength(2);
-      expect(points[0].label).toMatch(/^\d{4}-Q\d$/); // quarter label format
+      expect(points[0].period.label).toMatch(/^\d{4}-Q\d$/); // quarter label format
     });
 
     it('loads data only for the single requested board when boardId is specified', async () => {
@@ -441,17 +442,17 @@ describe('MetricsService', () => {
       expect(points).toHaveLength(2);
     });
 
-    it('trend points contain expected fields', async () => {
+    it('trend points contain OrgDoraResult fields', async () => {
       const points = await service.getDoraTrend({ boardId: 'ACC', limit: 1 });
       const p = points[0];
-      expect(p).toHaveProperty('label');
-      expect(p).toHaveProperty('start');
-      expect(p).toHaveProperty('end');
-      expect(p).toHaveProperty('deploymentsPerDay');
-      expect(p).toHaveProperty('medianLeadTimeDays');
-      expect(p).toHaveProperty('changeFailureRate');
-      expect(p).toHaveProperty('mttrMedianHours');
-      expect(p).toHaveProperty('orgBands');
+      expect(p).toHaveProperty('period.label');
+      expect(p).toHaveProperty('period.start');
+      expect(p).toHaveProperty('period.end');
+      expect(p).toHaveProperty('orgDeploymentFrequency.deploymentsPerDay');
+      expect(p).toHaveProperty('orgLeadTime.medianDays');
+      expect(p).toHaveProperty('orgChangeFailureRate.changeFailureRate');
+      expect(p).toHaveProperty('orgMttr.medianHours');
+      expect(p).toHaveProperty('boardBreakdowns');
     });
   });
 

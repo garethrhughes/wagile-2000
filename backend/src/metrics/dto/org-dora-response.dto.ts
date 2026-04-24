@@ -47,7 +47,7 @@ export interface OrgMttrResult {
 }
 
 export interface OrgDoraResult {
-  period: { start: string; end: string };
+  period: { label: string; start: string; end: string };
   orgDeploymentFrequency: OrgDeploymentFrequencyResult;
   orgLeadTime: OrgLeadTimeResult;
   orgChangeFailureRate: OrgCfrResult;
@@ -57,20 +57,4 @@ export interface OrgDoraResult {
   boardsUsingDefaultConfig: string[];
 }
 
-export interface TrendPoint {
-  label: string;
-  start: string;
-  end: string;
-  deploymentsPerDay: number;
-  medianLeadTimeDays: number;
-  changeFailureRate: number;
-  mttrMedianHours: number;
-  orgBands: {
-    deploymentFrequency: DoraBand;
-    leadTime: DoraBand;
-    changeFailureRate: DoraBand;
-    mttr: DoraBand;
-  };
-}
-
-export type TrendResponse = TrendPoint[];
+export type TrendResponse = OrgDoraResult[];

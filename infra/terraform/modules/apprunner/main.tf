@@ -128,7 +128,7 @@ resource "aws_apprunner_service" "frontend" {
           # build time. A runtime env var has no effect — the correct URL must
           # be passed as a --build-arg to `docker build` via `make ecr-push` /
           # `scripts/ecr-push.sh`, which reads it from `terraform output
-          # backend_service_url`.
+          # backend_custom_domain`.
           #
           # Force Next.js standalone server to bind on all interfaces.
           # App Runner's container runtime sets HOSTNAME to the internal EC2

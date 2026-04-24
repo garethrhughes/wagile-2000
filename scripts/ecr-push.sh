@@ -73,7 +73,7 @@ resolve_ecr_urls() {
 
 # NEXT_PUBLIC_API_URL is baked into the Next.js JS bundle at docker build time —
 # it cannot be injected at runtime via App Runner environment variables.
-# Read it from the Terraform backend_service_url output so the correct URL is
+# Read it from the Terraform backend_custom_domain output so the correct URL is
 # always used, with an env override for exceptional cases.
 resolve_api_url() {
   if [[ -n "${NEXT_PUBLIC_API_URL:-}" ]]; then
@@ -81,7 +81,7 @@ resolve_api_url() {
     return
   fi
 
-  echo "==> Reading backend service URL from Terraform outputs..."
+  echo "==> Reading backend custom domain URL from Terraform outputs..."
   if ! command -v terraform &>/dev/null; then
     echo "ERROR: terraform not found. Set NEXT_PUBLIC_API_URL manually." >&2
     exit 1
@@ -92,7 +92,7 @@ resolve_api_url() {
   popd >/dev/null
 
   if [[ -z "$NEXT_PUBLIC_API_URL" ]]; then
-    echo "ERROR: Could not read backend_service_url from Terraform. Have you run terraform apply?" >&2
+    echo "ERROR: Could not read backend_custom_domain from Terraform. Have you run terraform apply?" >&2
     echo "       Alternatively, set NEXT_PUBLIC_API_URL env var." >&2
     exit 1
   fi

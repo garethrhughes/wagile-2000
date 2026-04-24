@@ -5,9 +5,17 @@
  * USE_LAMBDA=false (local development). Delegates to MetricsService which
  * produces the correct OrgDoraResult / TrendResponse wire shapes.
  *
- * After each board sync, computes two snapshots:
+ * After each board sync, computes three snapshots:
  *   1. Per-board  — keyed to the board's own ID (e.g. 'ACC')
+ *      a. aggregate — OrgDoraResult for the current quarter
+ *      b. trend     — raw TrendResponse (oldest→newest) kept for symmetry with
+ *                     the Lambda path; used as the per-board raw trend store
+ *      c. trend-display — OrgDoraResult[] per quarter (oldest→newest), the
+ *                         display-ready shape the frontend trend endpoint reads
  *   2. Org-level  — keyed to ORG_SNAPSHOT_KEY ('__org__'), covering all boards
+ *      a. aggregate — OrgDoraResult for the current quarter across all boards
+ *      b. trend     — OrgDoraResult[] per quarter (oldest→newest) for multi-board
+ *                     trend view
  *
  * The org snapshot powers the "All boards" view in the DORA page. Per-board
  * snapshots power the individual board drill-down view.
@@ -26,6 +34,9 @@ import { listRecentQuarters } from '../metrics/period-utils.js';
 /** Snapshot key for the org-level (all boards) aggregate and trend. */
 export const ORG_SNAPSHOT_KEY = '__org__';
 
+/** Number of quarters to include in trend snapshots. */
+const TREND_QUARTERS = 8;
+
 @Injectable()
 export class InProcessSnapshotService {
   private readonly logger = new Logger(InProcessSnapshotService.name);
@@ -41,11 +52,19 @@ export class InProcessSnapshotService {
   /** Compute and persist only the per-board snapshot rows for a single board. */
   async computeBoard(boardId: string): Promise<void> {
     const currentQuarter = listRecentQuarters(1)[0].label;
+    const quarters = listRecentQuarters(TREND_QUARTERS);
 
     const [boardAggregate, boardTrend] = await Promise.all([
       this.metricsService.getDoraAggregate({ boardId, quarter: currentQuarter }),
-      this.metricsService.getDoraTrend({ boardId, limit: 8 }),
+      this.metricsService.getDoraTrend({ boardId, limit: TREND_QUARTERS }),
     ]);
+
+    // trend-display: one OrgDoraResult per quarter (oldest→newest) — the
+    // display-ready shape read by the frontend trend endpoint for per-board views.
+    const trendDisplayItems = await Promise.all(
+      quarters.map((q) => this.metricsService.getDoraAggregate({ boardId, quarter: q.label })),
+    );
+    const trendDisplay = trendDisplayItems.reverse(); // oldest → newest
 
     await this.snapshotRepo.upsert(
       [
@@ -63,6 +82,13 @@ export class InProcessSnapshotService {
           triggeredBy: boardId,
           stale: false,
         },
+        {
+          boardId,
+          snapshotType: 'trend-display' as const,
+          payload: trendDisplay,
+          triggeredBy: boardId,
+          stale: false,
+        },
       ],
       ['boardId', 'snapshotType'],
     );
@@ -73,14 +99,25 @@ export class InProcessSnapshotService {
   /** Compute and persist only the org-level (__org__) snapshot rows. */
   async computeOrg(): Promise<void> {
     const currentQuarter = listRecentQuarters(1)[0].label;
+    const quarters = listRecentQuarters(TREND_QUARTERS);
 
     const configs = await this.boardConfigRepo.find({ select: ['boardId'] });
     const allBoardIdStr = configs.map((c) => c.boardId).join(',');
 
-    const [orgAggregate, orgTrend] = await Promise.all([
-      this.metricsService.getDoraAggregate({ boardId: allBoardIdStr, quarter: currentQuarter }),
-      this.metricsService.getDoraTrend({ boardId: allBoardIdStr, limit: 8 }),
-    ]);
+    // Org aggregate: current quarter, all boards
+    const orgAggregate = await this.metricsService.getDoraAggregate({
+      boardId: allBoardIdStr,
+      quarter: currentQuarter,
+    });
+
+    // Org trend: OrgDoraResult per quarter across all boards (oldest→newest).
+    // This matches the shape the frontend expects from the multi-board trend endpoint.
+    const orgTrendItems = await Promise.all(
+      quarters.map((q) =>
+        this.metricsService.getDoraAggregate({ boardId: allBoardIdStr, quarter: q.label }),
+      ),
+    );
+    const orgTrend = orgTrendItems.reverse(); // oldest → newest
 
     await this.snapshotRepo.upsert(
       [

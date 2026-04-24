@@ -65,6 +65,7 @@ interface RawPeriodMetrics {
   lt:   { observations: number[]; anomalyCount: number };
   cfr:  { boardId: string; totalDeployments: number; failureCount: number; changeFailureRate: number; band: string; usingDefaultConfig: boolean };
   mttr: { recoveryHours: number[]; openIncidentCount: number; anomalyCount: number };
+  boardType?: 'scrum' | 'kanban';
 }
 
 /**
@@ -116,7 +117,7 @@ function buildAggregatePayload(
     return {
       boardId: r.df.boardId,
       period: { start: start.toISOString(), end: end.toISOString() },
-      boardType: 'scrum' as const,
+      boardType: r.boardType ?? 'scrum',
       deploymentFrequency: {
         boardId: r.df.boardId,
         totalDeployments: r.df.totalDeployments,
@@ -334,7 +335,7 @@ export const handler = async (event: SnapshotHandlerEvent): Promise<void> => {
   // to produce the org aggregate and trend rows. This avoids reloading all raw
   // Jira data (which caused the previous approach to time out on large boards).
   if (orgSnapshot) {
-    const allBoardConfigs = await boardConfigRepo.find({ select: ['boardId'] });
+    const allBoardConfigs = await boardConfigRepo.find({ select: ['boardId', 'boardType'] });
     const allBoardIds = allBoardConfigs
       .map((bc) => bc.boardId)
       .filter((id) => id !== ORG_SNAPSHOT_KEY);
@@ -343,6 +344,14 @@ export const handler = async (event: SnapshotHandlerEvent): Promise<void> => {
       console.warn('[snapshot-handler] No board configs found; skipping org-level snapshot.');
       return;
     }
+
+    // Map boardId → boardType for use when constructing RawPeriodMetrics breakdowns
+    const boardTypeMap = new Map<string, 'scrum' | 'kanban'>(
+      allBoardConfigs.map((bc) => [
+        bc.boardId,
+        bc.boardType === 'kanban' ? 'kanban' : 'scrum',
+      ]),
+    );
 
     // Read the per-board trend snapshots written by the per-board Lambda invocations.
     // Each payload is an array of { period, startDate, endDate, df, lt, cfr, mttr }
@@ -391,6 +400,7 @@ export const handler = async (event: SnapshotHandlerEvent): Promise<void> => {
           lt:   { observations: [...(p.lt?.observations ?? [])], anomalyCount: p.lt?.anomalyCount ?? 0 },
           cfr:  { boardId: snapshot.boardId, totalDeployments: p.cfr?.totalDeployments ?? 0, failureCount: p.cfr?.failureCount ?? 0, changeFailureRate: p.cfr?.changeFailureRate ?? 0, band: '', usingDefaultConfig: p.cfr?.usingDefaultConfig ?? false },
           mttr: { recoveryHours: [...(p.mttr?.recoveryHours ?? [])], openIncidentCount: p.mttr?.openIncidentCount ?? 0, anomalyCount: p.mttr?.anomalyCount ?? 0 },
+          boardType: boardTypeMap.get(snapshot.boardId) ?? 'scrum',
         };
 
         const existing = periodMap.get(p.period);
@@ -450,6 +460,10 @@ export const handler = async (event: SnapshotHandlerEvent): Promise<void> => {
   // Load only this board's data. Does NOT touch the org snapshot.
   const slice = await trendLoader.load(boardId, rangeStart, rangeEnd);
 
+  // Look up the board's type once — used in all period metrics for this board.
+  const boardConfig = await boardConfigRepo.findOne({ where: { boardId } });
+  const boardType: 'scrum' | 'kanban' = boardConfig?.boardType === 'kanban' ? 'kanban' : 'scrum';
+
   const trendPayload = quarters.map((q) => ({
     period:    q.label,
     startDate: q.startDate,
@@ -460,11 +474,12 @@ export const handler = async (event: SnapshotHandlerEvent): Promise<void> => {
     mttr: mttrService.getMttrObservationsFromData(slice, q.startDate, q.endDate),
   }));
 
-  const aggregateRaw = {
+  const aggregateRaw: RawPeriodMetrics = {
     df:   dfService.calculateFromData(slice, latestQuarter.startDate, latestQuarter.endDate),
     lt:   ltService.getLeadTimeObservationsFromData(slice, latestQuarter.startDate, latestQuarter.endDate),
     cfr:  cfrService.calculateFromData(slice, latestQuarter.startDate, latestQuarter.endDate),
     mttr: mttrService.getMttrObservationsFromData(slice, latestQuarter.startDate, latestQuarter.endDate),
+    boardType,
   };
   const aggregatePayload = buildAggregatePayload(
     [aggregateRaw],
@@ -479,6 +494,7 @@ export const handler = async (event: SnapshotHandlerEvent): Promise<void> => {
       lt:   ltService.getLeadTimeObservationsFromData(slice, q.startDate, q.endDate),
       cfr:  cfrService.calculateFromData(slice, q.startDate, q.endDate),
       mttr: mttrService.getMttrObservationsFromData(slice, q.startDate, q.endDate),
+      boardType,
     };
     return buildAggregatePayload([raw], q.startDate, q.endDate, q.label);
   });

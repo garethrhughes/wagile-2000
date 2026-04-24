@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, QueryRunner, Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
 import { JiraClientService } from '../jira/jira-client.service.js';
 import {
@@ -51,7 +51,18 @@ const DEFAULT_FIELD_CONFIG: FieldConfig = {
 @Injectable()
 export class SyncService {
   private readonly logger = new Logger(SyncService.name);
-  private syncRunning = false;
+
+  /**
+   * Postgres session-level advisory lock key used to prevent concurrent
+   * syncAll() runs across all App Runner instances (fleet-wide lock).
+   */
+  private static readonly SYNC_LOCK_KEY = 1_234_567_890;
+
+  /**
+   * QueryRunner holding the advisory lock while a sync is in progress.
+   * null when no sync is running on this instance.
+   */
+  private syncLockRunner: QueryRunner | null = null;
 
   constructor(
     private readonly jiraClient: JiraClientService,
@@ -78,7 +89,56 @@ export class SyncService {
     @InjectRepository(JiraFieldConfig)
     private readonly jiraFieldConfigRepo: Repository<JiraFieldConfig>,
     private readonly lambdaInvoker: LambdaInvokerService,
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
   ) {}
+
+  /**
+   * Attempt to acquire the Postgres advisory lock for sync.
+   *
+   * Uses a dedicated QueryRunner (= dedicated connection) because advisory
+   * locks are session-scoped in Postgres: they must be acquired and released
+   * on the exact same connection. Storing the QueryRunner in `syncLockRunner`
+   * lets `releaseSyncLock` find the right connection.
+   *
+   * Returns true if the lock was acquired, false if it is already held (by
+   * this instance or another App Runner instance in the fleet).
+   */
+  private async acquireSyncLock(): Promise<boolean> {
+    if (this.syncLockRunner !== null) return false; // already locked on this instance
+    const qr = this.dataSource.createQueryRunner();
+    await qr.connect();
+    try {
+      const [row] = await qr.query<[{ pg_try_advisory_lock: boolean }]>(
+        'SELECT pg_try_advisory_lock($1)',
+        [SyncService.SYNC_LOCK_KEY],
+      );
+      if (row.pg_try_advisory_lock) {
+        this.syncLockRunner = qr;
+        return true;
+      }
+      await qr.release();
+      return false;
+    } catch (err) {
+      await qr.release().catch(() => {});
+      throw err;
+    }
+  }
+
+  /**
+   * Release the Postgres advisory lock acquired by `acquireSyncLock`.
+   * Safe to call even if no lock is held.
+   */
+  private async releaseSyncLock(): Promise<void> {
+    if (!this.syncLockRunner) return;
+    const qr = this.syncLockRunner;
+    this.syncLockRunner = null;
+    try {
+      await qr.query('SELECT pg_advisory_unlock($1)', [SyncService.SYNC_LOCK_KEY]);
+    } finally {
+      await qr.release().catch(() => {});
+    }
+  }
 
   @Cron('0 */30 * * * *')
   async handleCron(): Promise<void> {
@@ -87,15 +147,17 @@ export class SyncService {
   }
 
   get isSyncRunning(): boolean {
-    return this.syncRunning;
+    return this.syncLockRunner !== null;
   }
 
   async syncAll(): Promise<{ boards: string[]; results: SyncLog[] }> {
-    if (this.syncRunning) {
-      this.logger.warn('syncAll() called while a sync is already in progress — skipping to prevent concurrent runs.');
+    const locked = await this.acquireSyncLock();
+    if (!locked) {
+      this.logger.warn(
+        'syncAll() could not acquire advisory lock — another instance may already be syncing.',
+      );
       return { boards: [], results: [] };
     }
-    this.syncRunning = true;
 
     const configs = await this.boardConfigRepo.find();
     const boardIds = configs.map((c) => c.boardId);
@@ -155,7 +217,7 @@ export class SyncService {
         ),
       );
     } finally {
-      this.syncRunning = false;
+      await this.releaseSyncLock();
     }
 
     return { boards: boardIds, results };

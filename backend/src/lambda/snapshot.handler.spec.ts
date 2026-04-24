@@ -113,6 +113,7 @@ describe('snapshot Lambda handler', () => {
     mockGetRepository.mockReturnValue({
       upsert: mockUpsert,
       find: jest.fn().mockResolvedValue([{ boardId: 'ACC' }]),
+      findOne: jest.fn().mockResolvedValue(null),
     });
     mockLoad.mockResolvedValue(makeEmptySlice());
 
@@ -158,6 +159,7 @@ describe('snapshot Lambda handler', () => {
     mockGetRepository.mockReturnValue({
       upsert: mockUpsert,
       find: jest.fn().mockResolvedValue([{ boardId: 'ACC' }, { boardId: 'BPT' }]),
+      findOne: jest.fn().mockResolvedValue(null),
     });
     await handler({ boardId: '__org__', orgSnapshot: true });
     expect(mockUpsert).toHaveBeenCalledTimes(1);

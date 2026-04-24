@@ -24,7 +24,6 @@ import { CycleTimeTrendQueryDto } from './dto/cycle-time-trend-query.dto.js';
 import {
   type OrgDoraResult,
   type TrendResponse,
-  type TrendPoint,
   type DoraMetricsBoardBreakdown,
 } from './dto/org-dora-response.dto.js';
 import {
@@ -256,7 +255,7 @@ export class MetricsService {
       }),
     );
 
-    const result = this.buildOrgDoraResult(boardResults, startDate, endDate);
+    const result = this.buildOrgDoraResult(boardResults, startDate, endDate, effectiveQuarter);
 
     // Store in cache before returning
     this.doraCache.set(cacheKey, result);
@@ -301,24 +300,9 @@ export class MetricsService {
       boardIds.map((bid) => this.trendDataLoader.load(bid, rangeStart, rangeEnd)),
     );
 
-    const points = quarters.map((q): TrendPoint => {
-      const agg = this.buildOrgDoraResultFromData(slices, q.startDate, q.endDate);
-      return {
-        label: q.label,
-        start: q.startDate.toISOString(),
-        end:   q.endDate.toISOString(),
-        deploymentsPerDay:    agg.orgDeploymentFrequency.deploymentsPerDay,
-        medianLeadTimeDays:   agg.orgLeadTime.medianDays,
-        changeFailureRate:    agg.orgChangeFailureRate.changeFailureRate,
-        mttrMedianHours:      agg.orgMttr.medianHours,
-        orgBands: {
-          deploymentFrequency: agg.orgDeploymentFrequency.band,
-          leadTime:            agg.orgLeadTime.band,
-          changeFailureRate:   agg.orgChangeFailureRate.band,
-          mttr:                agg.orgMttr.band,
-        },
-      };
-    });
+    const points = quarters.map((q): OrgDoraResult =>
+      this.buildOrgDoraResultFromData(slices, q.startDate, q.endDate, q.label),
+    );
 
     // Return oldest → newest
     const quarterTrend = points.reverse();
@@ -514,6 +498,7 @@ export class MetricsService {
     boardResults: PerBoardDoraResult[],
     startDate: Date,
     endDate: Date,
+    label = '',
   ): OrgDoraResult {
     // --- Org-level deployment frequency: sum of totals
     const totalDeployments = boardResults.reduce(
@@ -585,6 +570,7 @@ export class MetricsService {
 
     return {
       period: {
+        label,
         start: startDate.toISOString(),
         end: endDate.toISOString(),
       },
@@ -632,6 +618,7 @@ export class MetricsService {
     slices: TrendDataSlice[],
     startDate: Date,
     endDate: Date,
+    label = '',
   ): OrgDoraResult {
     const boardResults: PerBoardDoraResult[] = slices.map((slice) => {
       const df  = this.deploymentFrequencyService.calculateFromData(slice, startDate, endDate);
@@ -678,6 +665,6 @@ export class MetricsService {
       };
     });
 
-    return this.buildOrgDoraResult(boardResults, startDate, endDate);
+    return this.buildOrgDoraResult(boardResults, startDate, endDate, label);
   }
 }
