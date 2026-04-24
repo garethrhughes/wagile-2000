@@ -1,5 +1,6 @@
-import { Controller, Post, Get, HttpCode } from '@nestjs/common';
+import { Controller, Post, Get, HttpCode, HttpStatus, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { SyncService } from './sync.service.js';
 
 @ApiTags('sync')
@@ -10,7 +11,12 @@ export class SyncController {
   @ApiOperation({ summary: 'Trigger a full sync of all boards (fire-and-forget)' })
   @Post()
   @HttpCode(202)
-  triggerSync() {
+  triggerSync(@Res({ passthrough: true }) res: Response) {
+    if (this.syncService.isSyncRunning) {
+      res.status(HttpStatus.CONFLICT);
+      return { status: 'conflict', message: 'A sync is already in progress.' };
+    }
+
     // Run in background — do not await. A full sync across all boards takes
     // several minutes (changelog fetches per issue) and will exceed the
     // CloudFront 60-second origin timeout if awaited synchronously.

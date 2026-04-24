@@ -65,19 +65,15 @@ function abbreviateQuarter(label: string): string {
 
 interface TrendChartProps {
   title: string
-  data: TrendPoint[]
-  dataKey: keyof Pick<
-    TrendPoint,
-    'deploymentsPerDay' | 'medianLeadTimeDays' | 'changeFailureRate' | 'mttrMedianHours'
-  >
+  data: { label: string; value: number }[]
   unit: string
   color: string
 }
 
-function TrendChart({ title, data, dataKey, unit, color }: TrendChartProps) {
+function TrendChart({ title, data, unit, color }: TrendChartProps) {
   const chartData = data.map((p) => ({
     label: abbreviateQuarter(p.label),
-    value: p[dataKey],
+    value: p.value,
   }))
 
   if (chartData.length < 2) {
@@ -266,7 +262,7 @@ function DoraPageInner() {
         if (cancelled) return
         const aggregate = await getDoraAggregate({ boardId })
         if (!cancelled) {
-          setPageState({ status: 'ready', aggregate, trend })
+          setPageState({ status: 'ready', aggregate, trend: [...trend].reverse() })
         }
       } catch (err: unknown) {
         if (!cancelled) {
@@ -291,28 +287,28 @@ function DoraPageInner() {
   const dfSparkline = useMemo(
     () =>
       pageState.status === 'ready'
-        ? pageState.trend.map((p) => p.deploymentsPerDay)
+        ? pageState.trend.map((p) => p.orgDeploymentFrequency.deploymentsPerDay)
         : [],
     [pageState],
   )
   const ltSparkline = useMemo(
     () =>
       pageState.status === 'ready'
-        ? pageState.trend.map((p) => p.medianLeadTimeDays)
+        ? pageState.trend.map((p) => p.orgLeadTime?.medianDays ?? 0)
         : [],
     [pageState],
   )
   const cfrSparkline = useMemo(
     () =>
       pageState.status === 'ready'
-        ? pageState.trend.map((p) => p.changeFailureRate)
+        ? pageState.trend.map((p) => p.orgChangeFailureRate.changeFailureRate)
         : [],
     [pageState],
   )
   const mttrSparkline = useMemo(
     () =>
       pageState.status === 'ready'
-        ? pageState.trend.map((p) => p.mttrMedianHours)
+        ? pageState.trend.map((p) => p.orgMttr.medianHours)
         : [],
     [pageState],
   )
@@ -419,13 +415,13 @@ function DoraPageInner() {
 
       {/* Amber banner for lead time anomalies */}
       {pageState.status === 'ready' &&
-        pageState.aggregate.orgLeadTime.anomalyCount > 0 && (
+        (pageState.aggregate.orgLeadTime?.anomalyCount ?? 0) > 0 && (
           <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <p className="text-sm text-amber-700">
               <span className="font-semibold">
-                {pageState.aggregate.orgLeadTime.anomalyCount} issue
-                {pageState.aggregate.orgLeadTime.anomalyCount !== 1 ? 's' : ''} excluded
+                {pageState.aggregate.orgLeadTime?.anomalyCount} issue
+                {pageState.aggregate.orgLeadTime?.anomalyCount !== 1 ? 's' : ''} excluded
               </span>{' '}
               from Lead Time — no &quot;In Progress&quot; transition found; these issues
               are omitted from percentile calculations.
@@ -524,16 +520,16 @@ function DoraPageInner() {
             />
             <OrgMetricCard
               title="Lead Time for Changes"
-              value={pageState.aggregate.orgLeadTime.medianDays}
+              value={pageState.aggregate.orgLeadTime?.medianDays ?? 0}
               unit="days"
-              band={pageState.aggregate.orgLeadTime.band}
+              band={pageState.aggregate.orgLeadTime?.band ?? 'low'}
               sparkline={ltSparkline}
               contributingBoards={
-                pageState.aggregate.orgLeadTime.contributingBoards
+                pageState.aggregate.orgLeadTime?.contributingBoards ?? 0
               }
               noDataBoards={
                 selectedBoards.length -
-                pageState.aggregate.orgLeadTime.contributingBoards
+                (pageState.aggregate.orgLeadTime?.contributingBoards ?? 0)
               }
               footnote="Measures cycle time (first active-work status → done), not the DORA definition of lead time (commit → deploy). A proxy metric for teams without commit-level Jira integration."
             />
@@ -576,29 +572,25 @@ function DoraPageInner() {
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <TrendChart
                   title="Deployment Frequency"
-                  data={pageState.trend}
-                  dataKey="deploymentsPerDay"
+                  data={pageState.trend.map((p) => ({ label: p.period.label, value: p.orgDeploymentFrequency.deploymentsPerDay }))}
                   unit=" dep/d"
                   color="#3b82f6"
                 />
                 <TrendChart
                   title="Lead Time for Changes"
-                  data={pageState.trend}
-                  dataKey="medianLeadTimeDays"
+                  data={pageState.trend.map((p) => ({ label: p.period.label, value: p.orgLeadTime?.medianDays ?? 0 }))}
                   unit=" days"
                   color="#8b5cf6"
                 />
                 <TrendChart
                   title="Change Failure Rate"
-                  data={pageState.trend}
-                  dataKey="changeFailureRate"
+                  data={pageState.trend.map((p) => ({ label: p.period.label, value: p.orgChangeFailureRate.changeFailureRate }))}
                   unit="%"
                   color="#ef4444"
                 />
                 <TrendChart
                   title="Mean Time to Recovery"
-                  data={pageState.trend}
-                  dataKey="mttrMedianHours"
+                  data={pageState.trend.map((p) => ({ label: p.period.label, value: p.orgMttr.medianHours }))}
                   unit=" hrs"
                   color="#f59e0b"
                 />

@@ -71,9 +71,38 @@ resolve_ecr_urls() {
   fi
 }
 
+# NEXT_PUBLIC_API_URL is baked into the Next.js JS bundle at docker build time —
+# it cannot be injected at runtime via App Runner environment variables.
+# Read it from the Terraform backend_service_url output so the correct URL is
+# always used, with an env override for exceptional cases.
+resolve_api_url() {
+  if [[ -n "${NEXT_PUBLIC_API_URL:-}" ]]; then
+    echo "    Using NEXT_PUBLIC_API_URL from environment: $NEXT_PUBLIC_API_URL"
+    return
+  fi
+
+  echo "==> Reading backend service URL from Terraform outputs..."
+  if ! command -v terraform &>/dev/null; then
+    echo "ERROR: terraform not found. Set NEXT_PUBLIC_API_URL manually." >&2
+    exit 1
+  fi
+
+  pushd "$TF_DIR" >/dev/null
+  NEXT_PUBLIC_API_URL="$(terraform output -raw backend_custom_domain 2>/dev/null)"
+  popd >/dev/null
+
+  if [[ -z "$NEXT_PUBLIC_API_URL" ]]; then
+    echo "ERROR: Could not read backend_service_url from Terraform. Have you run terraform apply?" >&2
+    echo "       Alternatively, set NEXT_PUBLIC_API_URL env var." >&2
+    exit 1
+  fi
+}
+
 resolve_ecr_urls
+resolve_api_url
 echo "==> Backend ECR  : $ECR_BACKEND_URL"
 echo "==> Frontend ECR : $ECR_FRONTEND_URL"
+echo "==> API URL      : $NEXT_PUBLIC_API_URL"
 
 # ── ECR login ─────────────────────────────────────────────────────────────────
 AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
@@ -120,10 +149,10 @@ if [[ "$BUILD_BACKEND" == "true" ]]; then
 fi
 
 if [[ "$BUILD_FRONTEND" == "true" ]]; then
-  # NEXT_PUBLIC_API_URL is baked into the JS bundle at build time.
-  # Derive it from the backend ECR URL's subdomain pattern, or override via env.
-  NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-https://fragile-api.<your-domain>}"
-
+  # NEXT_PUBLIC_API_URL is resolved from Terraform outputs by resolve_api_url()
+  # above (or from the env override). It is baked into the JS bundle at build
+  # time via --build-arg — the App Runner runtime env var has no effect for
+  # Next.js NEXT_PUBLIC_ variables.
   build_and_push \
     "frontend" \
     "$REPO_ROOT/frontend" \

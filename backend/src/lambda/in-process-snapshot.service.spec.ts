@@ -85,14 +85,15 @@ describe('InProcessSnapshotService', () => {
 
   it('upserts four snapshot rows: per-board aggregate + trend, org aggregate + trend', async () => {
     await service.computeAndPersist('ACC');
-    expect(snapshotRepo.upsert).toHaveBeenCalledTimes(1);
-    const [rows] = snapshotRepo.upsert.mock.calls[0] as [
-      Array<{ boardId: string; snapshotType: string }>,
-      string[],
-    ];
-    expect(rows).toHaveLength(4);
-    const perBoard = rows.filter((r) => r.boardId === 'ACC');
-    const org      = rows.filter((r) => r.boardId === ORG_SNAPSHOT_KEY);
+    // computeAndPersist calls computeBoard then computeOrg — two separate upserts
+    expect(snapshotRepo.upsert).toHaveBeenCalledTimes(2);
+
+    const allRows = (snapshotRepo.upsert.mock.calls as [Array<{ boardId: string; snapshotType: string }>, string[]][])
+      .flatMap(([rows]) => rows);
+
+    expect(allRows).toHaveLength(4);
+    const perBoard = allRows.filter((r) => r.boardId === 'ACC');
+    const org      = allRows.filter((r) => r.boardId === ORG_SNAPSHOT_KEY);
     expect(perBoard.map((r) => r.snapshotType).sort()).toEqual(['aggregate', 'trend']);
     expect(org.map((r) => r.snapshotType).sort()).toEqual(['aggregate', 'trend']);
   });
@@ -103,11 +104,9 @@ describe('InProcessSnapshotService', () => {
 
     await service.computeAndPersist('ACC');
 
-    const [rows] = snapshotRepo.upsert.mock.calls[0] as [
-      Array<{ snapshotType: string; payload: unknown }>,
-      string[],
-    ];
-    const aggregateRow = rows.find((r) => r.snapshotType === 'aggregate');
+    const allRows = (snapshotRepo.upsert.mock.calls as [Array<{ snapshotType: string; payload: unknown }>, string[]][])
+      .flatMap(([rows]) => rows);
+    const aggregateRow = allRows.find((r) => r.snapshotType === 'aggregate');
     expect(aggregateRow?.payload).toBe(aggregate);
   });
 

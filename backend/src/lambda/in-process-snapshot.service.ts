@@ -38,24 +38,45 @@ export class InProcessSnapshotService {
     private readonly boardConfigRepo: Repository<BoardConfig>,
   ) {}
 
-  async computeAndPersist(triggeredBy: string): Promise<void> {
-    // Use the current calendar quarter so the aggregate period matches the
-    // Lambda handler path and the trend endpoint. Without this, resolvePeriod
-    // falls back to a rolling 90-day window which produces different metric
-    // values and shows a non-quarter date range in the board breakdown UI.
+  /** Compute and persist only the per-board snapshot rows for a single board. */
+  async computeBoard(boardId: string): Promise<void> {
     const currentQuarter = listRecentQuarters(1)[0].label;
 
-    // Resolve all configured board IDs for the org-level snapshot.
+    const [boardAggregate, boardTrend] = await Promise.all([
+      this.metricsService.getDoraAggregate({ boardId, quarter: currentQuarter }),
+      this.metricsService.getDoraTrend({ boardId, limit: 8 }),
+    ]);
+
+    await this.snapshotRepo.upsert(
+      [
+        {
+          boardId,
+          snapshotType: 'aggregate' as const,
+          payload: boardAggregate,
+          triggeredBy: boardId,
+          stale: false,
+        },
+        {
+          boardId,
+          snapshotType: 'trend' as const,
+          payload: boardTrend,
+          triggeredBy: boardId,
+          stale: false,
+        },
+      ],
+      ['boardId', 'snapshotType'],
+    );
+
+    this.logger.log(`Per-board snapshots persisted for board ${boardId}`);
+  }
+
+  /** Compute and persist only the org-level (__org__) snapshot rows. */
+  async computeOrg(): Promise<void> {
+    const currentQuarter = listRecentQuarters(1)[0].label;
+
     const configs = await this.boardConfigRepo.find({ select: ['boardId'] });
     const allBoardIdStr = configs.map((c) => c.boardId).join(',');
 
-    // Per-board snapshot for the triggering board.
-    const [boardAggregate, boardTrend] = await Promise.all([
-      this.metricsService.getDoraAggregate({ boardId: triggeredBy, quarter: currentQuarter }),
-      this.metricsService.getDoraTrend({ boardId: triggeredBy, limit: 8 }),
-    ]);
-
-    // Org-level snapshot covering all boards.
     const [orgAggregate, orgTrend] = await Promise.all([
       this.metricsService.getDoraAggregate({ boardId: allBoardIdStr, quarter: currentQuarter }),
       this.metricsService.getDoraTrend({ boardId: allBoardIdStr, limit: 8 }),
@@ -64,39 +85,29 @@ export class InProcessSnapshotService {
     await this.snapshotRepo.upsert(
       [
         {
-          boardId: triggeredBy,
-          snapshotType: 'aggregate' as const,
-          payload: boardAggregate,
-          triggeredBy,
-          stale: false,
-        },
-        {
-          boardId: triggeredBy,
-          snapshotType: 'trend' as const,
-          payload: boardTrend,
-          triggeredBy,
-          stale: false,
-        },
-        {
           boardId: ORG_SNAPSHOT_KEY,
           snapshotType: 'aggregate' as const,
           payload: orgAggregate,
-          triggeredBy,
+          triggeredBy: ORG_SNAPSHOT_KEY,
           stale: false,
         },
         {
           boardId: ORG_SNAPSHOT_KEY,
           snapshotType: 'trend' as const,
           payload: orgTrend,
-          triggeredBy,
+          triggeredBy: ORG_SNAPSHOT_KEY,
           stale: false,
         },
       ],
       ['boardId', 'snapshotType'],
     );
 
-    this.logger.log(
-      `Snapshots computed and persisted for board ${triggeredBy} and org-level (triggered by: ${triggeredBy})`,
-    );
+    this.logger.log(`Org-level snapshots persisted`);
+  }
+
+  /** @deprecated Use computeBoard() + computeOrg() separately. */
+  async computeAndPersist(triggeredBy: string): Promise<void> {
+    await this.computeBoard(triggeredBy);
+    await this.computeOrg();
   }
 }

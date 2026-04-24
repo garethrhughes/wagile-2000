@@ -68,14 +68,15 @@ export class MetricsController {
     @Query() query: DoraTrendQueryDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<TrendResponse | { status: string; message: string }> {
-    const snapshotKey =
-      query.boardId && !query.boardId.includes(',')
-        ? query.boardId
-        : ORG_SNAPSHOT_KEY;
+    const isSingleBoard = query.boardId && !query.boardId.includes(',');
+    const snapshotKey = isSingleBoard ? query.boardId! : ORG_SNAPSHOT_KEY;
+    // Per-board trend is stored raw (for org merging); display-ready shape is in
+    // 'trend-display'. Org snapshot writes OrgDoraResult shape directly to 'trend'.
+    const snapshotType = isSingleBoard ? ('trend-display' as const) : ('trend' as const);
 
     const snapshot = await this.doraSnapshotReadService.getSnapshot(
       snapshotKey,
-      'trend',
+      snapshotType,
     );
 
     if (!snapshot) {

@@ -633,31 +633,18 @@ export interface DoraMetricsBoardBreakdown extends DoraMetricsBoard {
 }
 
 export interface OrgDoraResult {
-  period: { start: string; end: string }
+  period: { label: string; start: string; end: string }
   orgDeploymentFrequency: OrgDeploymentFrequencyResult
-  orgLeadTime: OrgLeadTimeResult
+  orgLeadTime: OrgLeadTimeResult | undefined
   orgChangeFailureRate: OrgCfrResult
   orgMttr: OrgMttrResult
-  boardBreakdowns: DoraMetricsBoardBreakdown[]
+  boardBreakdowns: DoraMetricsBoardBreakdown[] | undefined
   anyBoardUsingDefaultConfig: boolean
   boardsUsingDefaultConfig: string[]
 }
 
-export interface TrendPoint {
-  label: string
-  start: string
-  end: string
-  deploymentsPerDay: number
-  medianLeadTimeDays: number
-  changeFailureRate: number
-  mttrMedianHours: number
-  orgBands: {
-    deploymentFrequency: DoraBand
-    leadTime: DoraBand
-    changeFailureRate: DoraBand
-    mttr: DoraBand
-  }
-}
+/** A trend entry is an OrgDoraResult — same shape as the aggregate. */
+export type TrendPoint = OrgDoraResult
 
 export type TrendResponse = TrendPoint[]
 
