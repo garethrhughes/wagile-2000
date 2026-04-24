@@ -331,11 +331,11 @@ export default function SettingsPage() {
             <RefreshCw className={`h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
             {isSyncing ? 'Syncing…' : 'Sync Now'}
           </button>
-          {Object.keys(lastSynced).length > 0 && (
+          {Object.values(lastSynced).filter(Boolean).length > 0 && (
             <p className="text-sm text-muted">
               Last synced:{' '}
               {new Date(
-                Object.values(lastSynced).reduce((a, b) => (a > b ? a : b)),
+                Object.values(lastSynced).filter(Boolean).reduce((a, b) => (a > b ? a : b)),
               ).toLocaleString()}
             </p>
           )}
