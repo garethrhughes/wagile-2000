@@ -51,3 +51,6 @@ a new ADR is created for the replacement decision.
 | [0037](0037-typeorm-column-projection-for-metric-queries.md) | TypeORM column projection as standard pattern for metric service queries | Accepted | 2026-04-23 |
 | [0038](0038-frontend-health-endpoint.md) | Dedicated frontend health endpoint for App Runner health checks | Accepted | 2026-04-23 |
 | [0039](0039-carry-over-sprint-issue-classification.md) | Carry-over sprint issues classified as committed, not added | Accepted | 2026-04-24 |
+| [0040](0040-lambda-post-sync-dora-snapshot-computation.md) | Lambda post-sync DORA snapshot computation | Accepted | 2026-04-25 |
+| [0041](0041-postgres-advisory-lock-for-sync-serialisation.md) | PostgreSQL advisory lock for distributed sync serialisation | Accepted | 2026-04-25 |
+| [0042](0042-trend-display-snapshot-type-and-org-merge-strategy.md) | `trend-display` snapshot type, org-merge-from-per-board strategy, and trend array direction | Accepted | 2026-04-25 |

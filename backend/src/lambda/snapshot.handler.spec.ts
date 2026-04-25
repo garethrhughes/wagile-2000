@@ -74,6 +74,20 @@ jest.mock('../metrics/working-time.service.js', () => ({
   WorkingTimeService: jest.fn().mockImplementation(() => ({})),
 }));
 
+// Stub listRecentQuarters so ordering tests can inject a fixed newest-first list
+// without depending on the current calendar date.
+const mockListRecentQuarters = jest.fn();
+jest.mock('../metrics/period-utils.js', () => ({
+  listRecentQuarters: (...args: [number, string?]) => mockListRecentQuarters(...args),
+}));
+
+// Capture the real implementation once; used as the default in beforeEach so
+// existing tests that don't override the mock still get a valid quarter list.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { listRecentQuarters: realListRecentQuarters } = jest.requireActual('../metrics/period-utils.js') as {
+  listRecentQuarters: (n: number, tz?: string) => Array<{ label: string; startDate: Date; endDate: Date }>;
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -110,6 +124,8 @@ describe('snapshot Lambda handler', () => {
     mockLtCalc.mockClear();
     mockCfrCalc.mockClear();
     mockMttrCalc.mockClear();
+    mockListRecentQuarters.mockClear();
+    mockListRecentQuarters.mockImplementation(realListRecentQuarters);
     mockGetRepository.mockReturnValue({
       upsert: mockUpsert,
       find: jest.fn().mockResolvedValue([{ boardId: 'ACC' }]),
@@ -195,5 +211,102 @@ describe('snapshot Lambda handler', () => {
   it('rethrows errors from TrendDataLoader so Lambda retries', async () => {
     mockLoad.mockRejectedValue(new Error('DB error'));
     await expect(handler({ boardId: 'ACC' })).rejects.toThrow('DB error');
+  });
+
+  // ── Ordering assertions ────────────────────────────────────────────────────
+  // These tests freeze the quarter list (injecting a fixed newest-first array)
+  // so the oldest→newest ordering guarantee is asserted deterministically,
+  // independent of the calendar date when the tests run.
+
+  describe('trend array ordering — oldest→newest (ADR-0042 §5)', () => {
+    // A fixed set of 4 quarters in newest-first order, matching what
+    // listRecentQuarters() returns at runtime.
+    const fixedQuartersNewestFirst = [
+      { label: '2025-Q4', startDate: new Date('2025-10-01T00:00:00Z'), endDate: new Date('2025-12-31T23:59:59.999Z') },
+      { label: '2025-Q3', startDate: new Date('2025-07-01T00:00:00Z'), endDate: new Date('2025-09-30T23:59:59.999Z') },
+      { label: '2025-Q2', startDate: new Date('2025-04-01T00:00:00Z'), endDate: new Date('2025-06-30T23:59:59.999Z') },
+      { label: '2025-Q1', startDate: new Date('2025-01-01T00:00:00Z'), endDate: new Date('2025-03-31T23:59:59.999Z') },
+    ];
+
+    beforeEach(() => {
+      mockListRecentQuarters.mockReturnValue(fixedQuartersNewestFirst);
+    });
+
+    it('persists per-board trend payload in oldest→newest order', async () => {
+      await handler({ boardId: 'ACC' });
+
+      const [rows] = mockUpsert.mock.calls[0] as [
+        Array<{ boardId: string; snapshotType: string; payload: Array<{ period: string }> }>,
+        string[],
+      ];
+      const trendRow = rows.find((r) => r.snapshotType === 'trend' && r.boardId === 'ACC');
+      expect(trendRow?.payload).toHaveLength(4);
+      // First entry must be the oldest quarter; last must be the newest.
+      expect(trendRow?.payload[0].period).toBe('2025-Q1');
+      expect(trendRow?.payload[3].period).toBe('2025-Q4');
+    });
+
+    it('persists per-board trend-display payload in oldest→newest order', async () => {
+      await handler({ boardId: 'ACC' });
+
+      const [rows] = mockUpsert.mock.calls[0] as [
+        Array<{ boardId: string; snapshotType: string; payload: Array<{ period: { label: string } }> }>,
+        string[],
+      ];
+      const displayRow = rows.find((r) => r.snapshotType === 'trend-display' && r.boardId === 'ACC');
+      expect(displayRow?.payload).toHaveLength(4);
+      // buildAggregatePayload wraps the label in period.label
+      expect(displayRow?.payload[0].period.label).toBe('2025-Q1');
+      expect(displayRow?.payload[3].period.label).toBe('2025-Q4');
+    });
+
+    it('persists org trend payload in oldest→newest order when board snapshots are unordered', async () => {
+      // Helper to build a minimal raw trend entry for a given period
+      const rawEntry = (period: string, startDate: string, endDate: string) => ({
+        period,
+        startDate,
+        endDate,
+        df:   { totalDeployments: 1, deploymentsPerDay: 0.01, periodDays: 91 },
+        lt:   { observations: [], anomalyCount: 0 },
+        cfr:  { totalDeployments: 1, failureCount: 0, changeFailureRate: 0, usingDefaultConfig: false },
+        mttr: { recoveryHours: [], openIncidentCount: 0, anomalyCount: 0 },
+      });
+
+      // Simulate board trend snapshots with periods stored in an arbitrary order
+      // (Q3 → Q1 → Q2), to verify the handler sorts them ascending before writing.
+      const mockFind = jest.fn()
+        .mockResolvedValueOnce([
+          { boardId: 'ACC', boardType: 'scrum' },
+          { boardId: 'BPT', boardType: 'scrum' },
+        ])
+        .mockResolvedValueOnce([
+          {
+            boardId: 'ACC',
+            payload: [
+              rawEntry('2025-Q3', '2025-07-01', '2025-09-30'),
+              rawEntry('2025-Q1', '2025-01-01', '2025-03-31'),
+              rawEntry('2025-Q2', '2025-04-01', '2025-06-30'),
+            ],
+          },
+        ]);
+
+      mockGetRepository.mockReturnValue({
+        upsert: mockUpsert,
+        find: mockFind,
+        findOne: jest.fn().mockResolvedValue(null),
+      });
+
+      await handler({ boardId: '__org__', orgSnapshot: true });
+
+      const [rows] = mockUpsert.mock.calls[0] as [
+        Array<{ boardId: string; snapshotType: string; payload: Array<{ period: { label: string } }> }>,
+        string[],
+      ];
+      const trendRow = rows.find((r) => r.snapshotType === 'trend' && r.boardId === '__org__');
+      expect(trendRow?.payload).toHaveLength(3);
+      // Regardless of the input order, the persisted array must be oldest→newest.
+      expect(trendRow?.payload[0].period.label).toBe('2025-Q1');
+      expect(trendRow?.payload[2].period.label).toBe('2025-Q3');
+    });
   });
 });

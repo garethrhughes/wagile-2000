@@ -1,9 +1,9 @@
 # 0037 — Lambda Post-Sync DORA Snapshot Computation
 
 **Date:** 2026-04-23
-**Status:** Accepted — implemented on branch `feat/lambda-snapshot-worker`
+**Status:** Accepted
 **Author:** Architect Agent
-**Related ADRs:** ADR-0032, ADR-0033, ADR-0036, ADR-0037
+**Related ADRs:** [ADR-0040](../decisions/0040-lambda-post-sync-dora-snapshot-computation.md), [ADR-0041](../decisions/0041-postgres-advisory-lock-for-sync-serialisation.md), [ADR-0042](../decisions/0042-trend-display-snapshot-type-and-org-merge-strategy.md)
 **Approved option from:** [0036 — DORA Page Reliability Options Analysis](0036-dora-page-reliability-options.md) — Step 2, Option C
 
 ---
