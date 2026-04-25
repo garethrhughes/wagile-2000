@@ -417,17 +417,20 @@ export const handler = async (event: SnapshotHandlerEvent): Promise<void> => {
       }
     }
 
+    // Sort oldest → newest (ascending by startDate) so trend charts render
+    // left-to-right in chronological order. This matches the in-process path
+    // (InProcessSnapshotService.computeOrg) and ADR-0042 §5.
     const mergedEntries = Array.from(periodMap.values()).sort(
-      (a, b) => b.startDate.localeCompare(a.startDate),
+      (a, b) => a.startDate.localeCompare(b.startDate),
     );
 
-    // Build the trend payload: one OrgDoraResult per period
+    // Build the trend payload: one OrgDoraResult per period (oldest → newest)
     const orgTrendPayload = mergedEntries.map((entry) =>
       buildAggregatePayload(entry.boardMetrics, entry.startDate, entry.endDate, entry.period),
     );
 
-    // Aggregate payload = latest quarter
-    const latestEntry = mergedEntries[0];
+    // Aggregate payload = latest quarter (last entry in oldest→newest array)
+    const latestEntry = mergedEntries[mergedEntries.length - 1];
     const orgAggregatePayload = latestEntry
       ? buildAggregatePayload(latestEntry.boardMetrics, latestEntry.startDate, latestEntry.endDate, latestEntry.period)
       : {};
@@ -464,6 +467,8 @@ export const handler = async (event: SnapshotHandlerEvent): Promise<void> => {
   const boardConfig = await boardConfigRepo.findOne({ where: { boardId } });
   const boardType: 'scrum' | 'kanban' = boardConfig?.boardType === 'kanban' ? 'kanban' : 'scrum';
 
+  // trendPayload: raw per-board metric output stored oldest→newest (ADR-0042 §5).
+  // quarters is newest-first, so reverse after mapping.
   const trendPayload = quarters.map((q) => ({
     period:    q.label,
     startDate: q.startDate,
@@ -472,7 +477,7 @@ export const handler = async (event: SnapshotHandlerEvent): Promise<void> => {
     lt:   ltService.getLeadTimeObservationsFromData(slice, q.startDate, q.endDate),
     cfr:  cfrService.calculateFromData(slice, q.startDate, q.endDate),
     mttr: mttrService.getMttrObservationsFromData(slice, q.startDate, q.endDate),
-  }));
+  })).reverse(); // oldest → newest
 
   const aggregateRaw: RawPeriodMetrics = {
     df:   dfService.calculateFromData(slice, latestQuarter.startDate, latestQuarter.endDate),
@@ -488,6 +493,8 @@ export const handler = async (event: SnapshotHandlerEvent): Promise<void> => {
     latestQuarter.label,
   );
 
+  // trendDisplayPayload: OrgDoraResult[] per quarter, oldest→newest (ADR-0042 §5).
+  // quarters is newest-first, so reverse after mapping.
   const trendDisplayPayload = quarters.map((q) => {
     const raw: RawPeriodMetrics = {
       df:   dfService.calculateFromData(slice, q.startDate, q.endDate),
@@ -497,7 +504,7 @@ export const handler = async (event: SnapshotHandlerEvent): Promise<void> => {
       boardType,
     };
     return buildAggregatePayload([raw], q.startDate, q.endDate, q.label);
-  });
+  }).reverse(); // oldest → newest
 
   await snapshotRepo.upsert(
     [

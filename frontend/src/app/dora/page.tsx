@@ -262,7 +262,10 @@ function DoraPageInner() {
         if (cancelled) return
         const aggregate = await getDoraAggregate({ boardId })
         if (!cancelled) {
-          setPageState({ status: 'ready', aggregate, trend: [...trend].reverse() })
+          // Backend guarantees oldest→newest order (ADR-0042 §5).
+          // Do not reverse here — the array is already in the correct
+          // chronological direction for left-to-right chart rendering.
+          setPageState({ status: 'ready', aggregate, trend })
         }
       } catch (err: unknown) {
         if (!cancelled) {
@@ -287,7 +290,7 @@ function DoraPageInner() {
   const dfSparkline = useMemo(
     () =>
       pageState.status === 'ready'
-        ? pageState.trend.map((p) => p.orgDeploymentFrequency.deploymentsPerDay)
+        ? pageState.trend.map((p) => p.orgDeploymentFrequency?.deploymentsPerDay ?? 0)
         : [],
     [pageState],
   )
@@ -301,14 +304,14 @@ function DoraPageInner() {
   const cfrSparkline = useMemo(
     () =>
       pageState.status === 'ready'
-        ? pageState.trend.map((p) => p.orgChangeFailureRate.changeFailureRate)
+        ? pageState.trend.map((p) => p.orgChangeFailureRate?.changeFailureRate ?? 0)
         : [],
     [pageState],
   )
   const mttrSparkline = useMemo(
     () =>
       pageState.status === 'ready'
-        ? pageState.trend.map((p) => p.orgMttr.medianHours)
+        ? pageState.trend.map((p) => p.orgMttr?.medianHours ?? 0)
         : [],
     [pageState],
   )
