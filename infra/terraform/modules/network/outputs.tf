@@ -4,7 +4,7 @@ output "vpc_id" {
 }
 
 output "public_subnet_ids" {
-  description = "List of public subnet IDs (two AZs, used by ECS Express-managed ALB)."
+  description = "List of public subnet IDs (one per AZ)."
   value       = [aws_subnet.public_a.id, aws_subnet.public_b.id]
 }
 

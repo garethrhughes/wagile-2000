@@ -145,13 +145,22 @@ resource "aws_subnet" "private_b" {
 }
 
 # ── Security group: ECS backend tasks ────────────────────────────────────────
-# Attached to backend ECS tasks running in private subnets. Allows all outbound
-# traffic (RDS on 5432 + internet via NAT for Jira API).
+# Attached to backend ECS tasks running in private subnets. Allows inbound
+# traffic from the Express-managed ALB on port 3001, and all outbound traffic
+# (RDS on 5432 + internet via NAT for Jira API).
 
 resource "aws_security_group" "ecs_backend" {
   name        = "fragile-ecs-backend-sg"
-  description = "Security group for backend ECS tasks (RDS + outbound internet)."
+  description = "Security group for backend ECS tasks (inbound 3001 from VPC, RDS + outbound internet)."
   vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description = "Allow inbound traffic from Express-managed ALB on backend container port"
+    from_port   = 3001
+    to_port     = 3001
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.main.cidr_block]
+  }
 
   egress {
     description = "Allow all outbound traffic (RDS + internet via NAT)"
@@ -167,12 +176,21 @@ resource "aws_security_group" "ecs_backend" {
 }
 
 # ── Security group: ECS frontend tasks ───────────────────────────────────────
-# Attached to frontend ECS tasks. Egress-only — no VPC dependencies.
+# Attached to frontend ECS tasks. Allows inbound traffic from the
+# Express-managed ALB on port 3000 and all outbound traffic.
 
 resource "aws_security_group" "ecs_frontend" {
   name        = "fragile-ecs-frontend-sg"
-  description = "Security group for frontend ECS tasks (egress-only, no VPC dependencies)."
+  description = "Security group for frontend ECS tasks (inbound 3000 from VPC, all outbound)."
   vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description = "Allow inbound traffic from Express-managed ALB on frontend container port"
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.main.cidr_block]
+  }
 
   egress {
     description = "Allow all outbound traffic"
