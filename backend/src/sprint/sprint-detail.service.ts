@@ -252,17 +252,7 @@ export class SprintDetailService {
     };
 
     // -----------------------------------------------------------------------
-    // Query 3: Load closed sprint names for carry-over detection.
-    // Only issues moved from a closed sprint are genuine carry-overs.
-    // Issues moved from future/groomed sprints are mid-sprint scope additions.
-    // -----------------------------------------------------------------------
-    const closedSprintsForBoard = await this.sprintRepo.find({
-      where: { boardId, state: 'closed' },
-    });
-    const closedSprintNames = new Set(closedSprintsForBoard.map((s) => s.name));
-
-    // -----------------------------------------------------------------------
-    // Query 4: Load all board issues (needed to replay changelogs correctly)
+    // Query 3: Load all board issues (needed to replay changelogs correctly)
     // Cannot rely on sprintId column — it stores only the last-synced sprint.
     // -----------------------------------------------------------------------
     const allBoardIssues = await this.issueRepo.find({
@@ -284,7 +274,7 @@ export class SprintDetailService {
     );
 
     // -----------------------------------------------------------------------
-    // Query 5: Bulk-load Sprint-field changelogs for all board issue keys
+    // Query 4: Bulk-load Sprint-field changelogs for all board issue keys
     // -----------------------------------------------------------------------
     const sprintChangelogs = await this.changelogRepo
       .createQueryBuilder('cl')
@@ -333,6 +323,19 @@ export class SprintDetailService {
     const removedKeys = new Set<string>();
 
     if (sprintStart) {
+      // -----------------------------------------------------------------------
+      // Query 5: Load closed sprint names for carry-over detection.
+      // Deferred to here so the query only runs when there are issues and
+      // changelogs to classify. Only issues moved from a closed sprint are
+      // genuine carry-overs; moves from future/groomed sprints are additions.
+      // Only `name` is selected to minimise the data fetched.
+      // -----------------------------------------------------------------------
+      const closedSprintsForBoard = await this.sprintRepo.find({
+        where: { boardId, state: 'closed' },
+        select: ['name'],
+      });
+      const closedSprintNames = new Set(closedSprintsForBoard.map((s) => s.name));
+
       const effectiveSprintStart = new Date(
         sprintStart.getTime() + SPRINT_GRACE_PERIOD_MS,
       );

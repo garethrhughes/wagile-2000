@@ -96,18 +96,13 @@ export class PlanningService {
       );
     }
 
-    // Fetch all closed sprints for this board upfront.
-    // 1. Used as the list of closed sprints to process (no-filter path, reused below).
-    // 2. Provides the closed sprint names needed for carry-over detection so that
-    //    issues moved from future/groomed sprints are NOT misclassified as carry-overs.
-    const closedSprints = await this.sprintRepo.find({
-      where: { boardId, state: 'closed' },
-      order: { startDate: 'DESC' },
-    });
-    const closedSprintNames = new Set(closedSprints.map((s) => s.name));
-
-    // Get sprints to analyze
+    // Build sprint list. For the no-filter path, closed sprints are loaded here
+    // so they can serve double duty: the sprint list AND closedSprintNames.
+    // For the sprintId/quarter paths, closedSprintNames is fetched separately
+    // but only when there is at least one sprint to process.
     let sprints: JiraSprint[];
+    let closedSprintNames: Set<string> = new Set();
+    let closedSprintNamesLoaded = false;
 
     if (sprintId) {
       const sprint = await this.sprintRepo.findOne({
@@ -125,13 +120,29 @@ export class PlanningService {
         .orderBy('s.startDate', 'ASC')
         .getMany();
     } else {
-      // Return all non-future sprints: active first, then closed descending.
-      // Reuse closedSprints — no second query needed.
+      // No-filter path: load closed sprints once for both the sprint list and
+      // carry-over detection — no second query needed in this path.
+      const closedSprints = await this.sprintRepo.find({
+        where: { boardId, state: 'closed' },
+        order: { startDate: 'DESC' },
+      });
+      closedSprintNames = new Set(closedSprints.map((s) => s.name));
+      closedSprintNamesLoaded = true;
       const active = await this.sprintRepo.find({
         where: { boardId, state: 'active' },
         order: { startDate: 'DESC' },
       });
       sprints = [...active, ...closedSprints];
+    }
+
+    // For the sprintId/quarter paths: only fetch closed sprint names when there
+    // are sprints to process, avoiding an unnecessary query on empty results.
+    if (sprints.length > 0 && !closedSprintNamesLoaded) {
+      const closed = await this.sprintRepo.find({
+        where: { boardId, state: 'closed' },
+        select: ['name'],
+      });
+      closedSprintNames = new Set(closed.map((s) => s.name));
     }
 
     const results: SprintAccuracy[] = [];

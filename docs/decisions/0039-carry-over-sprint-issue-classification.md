@@ -124,6 +124,10 @@ before the sprint-list branching so that it can serve double duty: building
 - Issues pulled from future/groomed sprints are now correctly counted as `added`,
   not `commitment`, giving accurate scope-change reporting.
 - One additional `sprintRepo.find` query is issued per `getAccuracy` / `getDetail`
-  call, but the no-filter path in `getAccuracy` eliminates its previous duplicate
-  closed-sprints query, so the net query count is unchanged or reduced.
+  call when there are sprints to process. In `getAccuracy`, the no-filter path
+  reuses the closed-sprints query for both the sprint list and carry-over names
+  (no extra query); the `sprintId` and `quarter` paths add one closed-sprint
+  query, but only when they return at least one sprint. In `getDetail`, the
+  closed-sprints query is deferred to inside the `if (sprintStart)` block and
+  only executed when there are issues and changelogs to classify.
 - No schema changes, no API contract changes.
