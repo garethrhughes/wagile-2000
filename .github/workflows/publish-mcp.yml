@@ -35,5 +35,3 @@ jobs:
       - run: npm publish --provenance --access public
         if: steps.check-version.outputs.should_publish == 'true'
         working-directory: apps/mcp
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
