@@ -110,6 +110,93 @@ working-day definition are configurable via the `workingTime:` stanza in `boards
 
 ---
 
+## AI Assistant Integration (MCP)
+
+Fragile ships an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server —
+[`@fragile.app/mcp`](https://www.npmjs.com/package/@fragile.app/mcp) — that lets AI assistants
+query the metrics dashboard directly. Claude Desktop, Cursor, and any other MCP-compatible client
+can invoke tools like `get_dora_metrics` or run prompt templates like `dora_health_report` without
+manual API calls or copy-pasting from the UI.
+
+The MCP server is a standalone subprocess that calls the Fragile REST API over HTTP. It requires
+no database access and makes no Jira API calls — all data comes from the PostgreSQL cache
+maintained by the sync service.
+
+### Quick setup
+
+**Claude Desktop** — add to `~/Library/Application Support/Claude/claude_desktop_config.json`
+(macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "fragile": {
+      "command": "npx",
+      "args": ["-y", "@fragile.app/mcp"],
+      "env": {
+        "API_BASE_URL": "https://api.your-fragile-domain.com"
+      }
+    }
+  }
+}
+```
+
+**Cursor** — add to `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "fragile": {
+      "command": "npx",
+      "args": ["-y", "@fragile.app/mcp"],
+      "env": {
+        "API_BASE_URL": "https://api.your-fragile-domain.com"
+      }
+    }
+  }
+}
+```
+
+Restart the client. The Fragile tools appear in the tool picker immediately.
+
+### Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `API_BASE_URL` | **Yes** | Base URL of the Fragile API, e.g. `https://api.your-fragile-domain.com` or `http://localhost:3001` for local use |
+| `API_KEY` | No | Bearer token for authentication if re-enabled. Leave unset for private-network deployments. |
+
+### Available tools (16)
+
+| Category | Tools |
+|---|---|
+| **DORA** | `get_dora_metrics`, `get_dora_trend`, `get_snapshot_status` |
+| **Planning** | `get_planning_accuracy`, `list_sprints`, `list_quarters` |
+| **Cycle time** | `get_cycle_time`, `get_cycle_time_trend` |
+| **Sprint** | `get_sprint_detail`, `get_sprint_report` |
+| **Roadmap** | `get_roadmap_accuracy` |
+| **Boards** | `list_boards`, `get_board_config` |
+| **Sync** | `get_sync_status` |
+| **Gaps** | `get_hygiene_gaps`, `get_unplanned_done` |
+
+All tools are read-only — no tool triggers a mutation in Fragile or Jira.
+
+### Prompt templates (4)
+
+Pre-canned multi-tool workflows that return a structured Markdown report in a single invocation:
+
+| Prompt | What it produces |
+|---|---|
+| `dora_health_report` | Org-level DORA bands, per-board breakdown, 4-quarter trend, and data freshness |
+| `sprint_retrospective` | Planning accuracy, ticket-level classification, scope changes, and recommendations for a sprint |
+| `release_readiness` | Readiness verdict combining sprint completion, DORA signals, hygiene gaps, and unplanned work |
+| `quarterly_planning_review` | Cross-board planning accuracy, DORA aggregate, roadmap coverage, and observations for leadership |
+
+See [`apps/mcp/README.md`](apps/mcp/README.md) for full documentation, including the resource
+URIs (`boards://list`, `boards://{boardId}/config`) and local development instructions.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
@@ -822,6 +909,11 @@ running migrations.
 
 ```
 fragile/
+├── apps/
+│   └── mcp/                    # @fragile.app/mcp — MCP server npm package
+│       ├── src/                # TypeScript source (tools, resources, prompts, client)
+│       ├── test/               # Vitest unit tests
+│       └── package.json        # Published to npm as @fragile.app/mcp
 ├── backend/                    # NestJS 11 API server (port 3001)
 │   ├── config/                 # YAML configuration files (not committed)
 │   │   ├── boards.example.yaml # Annotated board config template (tracked in git)

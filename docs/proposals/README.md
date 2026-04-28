@@ -41,3 +41,4 @@
 | [0037](0037-lambda-post-sync-dora-computation.md) | Lambda Post-Sync DORA Snapshot Computation | Accepted | 2026-04-23 |
 | [0038](0038-carry-over-sprint-issue-classification.md) | Carry-Over Sprint Issue Classification Fix | Accepted | 2026-04-24 |
 | [0039](0039-migrate-from-app-runner-to-ecs-express.md) | Migrate from AWS App Runner to ECS Fargate | Accepted | 2026-04-25 |
+| [0040](0040-mcp-server.md) | MCP Server for Fragile | Accepted | 2026-04-29 |

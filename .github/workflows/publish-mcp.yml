@@ -1,0 +1,39 @@
+name: Publish @fragile.app/mcp
+
+on:
+  push:
+    branches: [main]
+    paths: ['apps/mcp/**']
+
+permissions:
+  contents: read
+  id-token: write   # required for npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm ci
+        working-directory: apps/mcp
+      - run: npm run build
+        working-directory: apps/mcp
+      - id: check-version
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          fi
+        working-directory: apps/mcp
+      - run: npm publish --provenance --access public
+        if: steps.check-version.outputs.should_publish == 'true'
+        working-directory: apps/mcp
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
