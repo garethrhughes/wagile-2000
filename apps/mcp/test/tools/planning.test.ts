@@ -51,6 +51,17 @@ describe('Planning tools', () => {
       expect((result as unknown as { isError: boolean }).isError).toBe(true);
       expect(result.content[0]?.text).toContain('Planning accuracy is not available for Kanban boards');
     });
+
+    it('does not swallow non-Kanban 400 errors', async () => {
+      // A generic 400 (e.g. unknown boardId) must pass through with its original message
+      mockApiGet.mockRejectedValueOnce(
+        new McpError(-32603, 'HTTP 400: boardId not found'),
+      );
+      const server = makeServer();
+      const result = await callTool(server, 'get_planning_accuracy', { boardId: 'UNKNOWN' });
+      expect((result as unknown as { isError: boolean }).isError).toBe(true);
+      expect(result.content[0]?.text).toContain('HTTP 400: boardId not found');
+    });
   });
 
   describe('list_sprints', () => {
