@@ -19,4 +19,13 @@ export class DoraAggregateQueryDto {
   @IsString()
   @Matches(/^\d{4}-Q[1-4]$/, { message: 'quarter must be in YYYY-QN format, e.g. 2026-Q2' })
   quarter?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Sprint ID — when provided, metrics are scoped to the sprint window ' +
+      'instead of a calendar quarter.',
+  })
+  @IsOptional()
+  @IsString()
+  sprintId?: string;
 }

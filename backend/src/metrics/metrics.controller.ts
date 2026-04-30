@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Res } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Query, Res } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
@@ -35,6 +35,12 @@ export class MetricsController {
     @Query() query: DoraAggregateQueryDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<OrgDoraResult | { status: string; message: string }> {
+    // Sprint-scoped aggregate: bypass snapshot and compute live for the sprint window.
+    if (query.sprintId) {
+      return this.metricsService.getDoraAggregate(query);
+    }
+
+    // Quarter mode: serve from pre-computed snapshot.
     // When a single boardId is provided use the per-board snapshot;
     // otherwise (no boardId, or multiple) use the org-level snapshot.
     const snapshotKey =
@@ -69,10 +75,20 @@ export class MetricsController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<TrendResponse | { status: string; message: string }> {
     const isSingleBoard = query.boardId && !query.boardId.includes(',');
+
+    // Sprint mode requires exactly one Scrum board — reject multi-board requests
+    // before attempting a snapshot lookup (org snapshot has no trend-sprint entry).
+    if (query.mode === 'sprint' && !isSingleBoard) {
+      throw new BadRequestException('Sprint trend mode requires a single boardId.');
+    }
+
     const snapshotKey = isSingleBoard ? query.boardId! : ORG_SNAPSHOT_KEY;
-    // Per-board trend is stored raw (for org merging); display-ready shape is in
-    // 'trend-display'. Org snapshot writes OrgDoraResult shape directly to 'trend'.
-    const snapshotType = isSingleBoard ? ('trend-display' as const) : ('trend' as const);
+
+    // Sprint mode uses the dedicated trend-sprint snapshot (per-board only).
+    // Quarter mode uses trend-display (per-board) or trend (org).
+    const snapshotType = query.mode === 'sprint'
+      ? 'trend-sprint' as const
+      : isSingleBoard ? ('trend-display' as const) : ('trend' as const);
 
     const snapshot = await this.doraSnapshotReadService.getSnapshot(
       snapshotKey,
@@ -94,9 +110,12 @@ export class MetricsController {
 
     // Sort ascending by period.start so chart order is deterministic regardless
     // of how the snapshot was written (newest-first, oldest-first, or arbitrary).
-    const sorted = [...payload].sort(
-      (a, b) => new Date(a.period.start).getTime() - new Date(b.period.start).getTime(),
-    );
+    // Null-guard handles malformed snapshot payloads that may lack a period field.
+    const sorted = [...payload].sort((a, b) => {
+      const aTime = a.period?.start ? new Date(a.period.start).getTime() : 0;
+      const bTime = b.period?.start ? new Date(b.period.start).getTime() : 0;
+      return aTime - bTime;
+    });
 
     // Take the most recent N periods (tail of the sorted array).
     if (query.limit !== undefined) {

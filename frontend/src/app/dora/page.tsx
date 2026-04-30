@@ -29,7 +29,6 @@ import { useBoardsStore } from '@/store/boards-store'
 import { OrgMetricCard } from '@/components/ui/org-metric-card'
 import { BoardBreakdownTable } from '@/components/ui/board-breakdown-table'
 import { BoardChip } from '@/components/ui/board-chip'
-import { ToggleChip } from '@/components/ui/toggle-chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { NoBoardsConfigured } from '@/components/ui/no-boards-configured'
 import { MetricHelp, type MetricDefinition } from '@/components/ui/metric-help'
@@ -224,6 +223,9 @@ function DoraPageInner() {
   // for every intermediate state. Chips update immediately; fetch waits 400 ms.
   const debouncedBoards = useDebounce(selectedBoards, 400)
 
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+
   const reload = useCallback(() => {
     setRetryKey((k) => k + 1)
   }, [])
@@ -238,12 +240,16 @@ function DoraPageInner() {
     [selectedBoards, kanbanBoardIds, boardsStatus],
   )
 
-  // Auto-reset to quarter when sprint mode becomes unavailable
+  // Auto-reset to quarter when sprint mode becomes unavailable.
+  // Only fires once the boards store is ready — avoids resetting on first render
+  // before the store has hydrated, which would cause a hydration mismatch and
+  // clear a valid ?mode=sprint param before the fetch runs.
   useEffect(() => {
+    if (boardsStatus !== 'ready') return
     if (!sprintModeAvailable && periodType === 'sprint') {
       replaceParams({ mode: 'quarter' })
     }
-  }, [sprintModeAvailable, periodType, replaceParams])
+  }, [boardsStatus, sprintModeAvailable, periodType, replaceParams])
 
   // Main data fetch — fires on filter change or retry
   useEffect(() => {
@@ -255,12 +261,25 @@ function DoraPageInner() {
       }
       setPageState({ status: 'loading' })
       const boardId = debouncedBoards.join(',')
+      const isSprintMode = periodType === 'sprint'
       try {
-        // Fetch trend first so we can align the aggregate window to the rightmost
-        // chart point using the server's timezone, not the browser's local date.
-        const trend = await getDoraTrend({ boardId, limit: 8 })
+        const trend = await getDoraTrend({
+          boardId,
+          limit: 8,
+          ...(isSprintMode ? { mode: 'sprint' as const } : {}),
+        })
         if (cancelled) return
-        const aggregate = await getDoraAggregate({ boardId })
+
+        // In sprint mode the aggregate cards reflect the most recent sprint.
+        // TrendPoint is the same shape as OrgDoraResult so we reuse the last
+        // trend point directly — avoids a second call that would return quarter data.
+        let aggregate: OrgDoraResult
+        if (isSprintMode && trend.length > 0) {
+          aggregate = trend[trend.length - 1]!
+        } else {
+          aggregate = await getDoraAggregate({ boardId })
+          if (cancelled) return
+        }
         if (!cancelled) {
           // Backend guarantees oldest→newest order (ADR-0042 §5).
           // Do not reverse here — the array is already in the correct
@@ -284,7 +303,7 @@ function DoraPageInner() {
     return () => {
       cancelled = true
     }
-  }, [debouncedBoards, retryKey])
+  }, [debouncedBoards, retryKey, periodType])
 
   // RC-5: extract sparklines from TrendPoint[] per metric
   const dfSparkline = useMemo(
@@ -373,30 +392,45 @@ function DoraPageInner() {
           <label className="mb-2 block text-sm font-medium text-muted">
             Period
           </label>
-          <div className="inline-flex gap-1">
-            <ToggleChip
-              label="Quarter"
-              selected={periodType === 'quarter'}
+          <div className="inline-flex rounded-lg border border-border">
+            <button
+              type="button"
               onClick={() => replaceParams({ mode: 'quarter' })}
-            />
-            <ToggleChip
-              label="Sprint"
-              selected={periodType === 'sprint'}
-              disabled={!sprintModeAvailable}
+              className={`rounded-l-lg px-4 py-2 text-sm font-medium transition-colors ${
+                periodType === 'quarter'
+                  ? 'bg-interactive-selected-bg text-interactive-selected-fg'
+                  : 'text-muted hover:bg-interactive-hover-bg'
+              }`}
+            >
+              Quarter
+            </button>
+            <button
+              type="button"
+              disabled={mounted && !sprintModeAvailable}
               onClick={() => {
                 if (sprintModeAvailable) replaceParams({ mode: 'sprint' })
               }}
-            />
+              className={`rounded-r-lg px-4 py-2 text-sm font-medium transition-colors ${
+                periodType === 'sprint'
+                  ? 'bg-interactive-selected-bg text-interactive-selected-fg'
+                  : mounted && !sprintModeAvailable
+                    ? 'cursor-not-allowed text-muted opacity-40'
+                    : 'text-muted hover:bg-interactive-hover-bg'
+              }`}
+            >
+              Sprint
+            </button>
           </div>
-          {!sprintModeAvailable && (
+          {mounted && !sprintModeAvailable && (
             <p className="mt-2 text-xs text-muted">Sprint mode requires a single Scrum board</p>
           )}
           {periodType === 'sprint' && selectedBoards.length === 1 && (
             <p className="mt-1 text-xs text-muted">
-              Showing last 8 periods for {selectedBoards[0]}
+              Showing last 8 sprints for {selectedBoards[0]}
             </p>
           )}
         </div>
+
       </div>
 
       {/* Amber banner for default CFR config */}

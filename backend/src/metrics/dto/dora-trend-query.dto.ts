@@ -24,4 +24,21 @@ export class DoraTrendQueryDto {
   @Min(1)
   @Max(20)
   limit?: number;
+
+  @ApiPropertyOptional({
+    description: 'Period mode: "quarter" (default) or "sprint".',
+    enum: ['quarter', 'sprint'],
+    default: 'quarter',
+  })
+  @IsOptional()
+  @IsString()
+  mode?: 'quarter' | 'sprint';
+
+  @ApiPropertyOptional({
+    description:
+      'Sprint ID — only used when mode=sprint and a single boardId is given.',
+  })
+  @IsOptional()
+  @IsString()
+  sprintId?: string;
 }

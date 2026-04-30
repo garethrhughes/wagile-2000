@@ -651,12 +651,18 @@ export type TrendResponse = TrendPoint[]
 export interface DoraAggregateParams {
   /** Comma-separated board IDs (same semantics as MetricsQueryDto.boardId) */
   boardId?: string
+  /** Sprint ID — when provided, metrics are scoped to the sprint window. */
+  sprintId?: string
 }
 
 export interface DoraTrendParams {
   /** Comma-separated board IDs (same semantics as MetricsQueryDto.boardId) */
   boardId?: string
   limit?: number
+  /** Period mode: 'quarter' (default) or 'sprint'. */
+  mode?: 'quarter' | 'sprint'
+  /** Sprint ID — used when mode='sprint'. */
+  sprintId?: string
 }
 
 /**
@@ -683,6 +689,7 @@ export function getDoraAggregate(params: DoraAggregateParams): Promise<OrgDoraRe
   return fetchDoraSnapshot(
     `/api/metrics/dora/aggregate${toQueryString({
       boardId: params.boardId,
+      sprintId: params.sprintId,
     })}`,
   )
 }
@@ -692,6 +699,8 @@ export function getDoraTrend(params: DoraTrendParams): Promise<TrendResponse> {
     `/api/metrics/dora/trend${toQueryString({
       boardId: params.boardId,
       limit: params.limit !== undefined ? String(params.limit) : undefined,
+      mode: params.mode,
+      sprintId: params.sprintId,
     })}`,
   )
 }

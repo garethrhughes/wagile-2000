@@ -159,7 +159,10 @@ describe('MetricsController — snapshot-aware endpoints', () => {
     });
 
     it('slices the periods array to the requested limit', async () => {
-      const periods = Array.from({ length: 8 }, (_, i) => ({ label: `Q${i + 1}` }));
+      const periods = Array.from({ length: 8 }, (_, i) => ({
+        label: `Q${i + 1}`,
+        period: { label: `2025-Q${i + 1}`, start: `2025-0${(i % 3) + 1}-01T00:00:00.000Z`, end: `2025-0${(i % 3) + 1}-30T23:59:59.999Z` },
+      }));
       const snapshot: SnapshotResult = {
         payload: periods as unknown as TrendResponse,
         ageSeconds: 100,

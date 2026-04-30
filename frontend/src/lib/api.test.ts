@@ -95,3 +95,57 @@ describe('getDoraTrend', () => {
     expect(options.next?.revalidate).toBe(60);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Sprint mode params — getDoraTrend and getDoraAggregate
+// ---------------------------------------------------------------------------
+
+describe('getDoraTrend — sprint mode params', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([]),
+    });
+  });
+
+  it('includes sprintId in query string when provided', async () => {
+    await getDoraTrend({ boardId: 'ACC', limit: 8, sprintId: 'sprint-42', mode: 'sprint' });
+
+    const [url] = mockFetch.mock.calls[0] as [string];
+    expect(url).toContain('sprintId=sprint-42');
+    expect(url).toContain('mode=sprint');
+  });
+
+  it('does not include sprintId in query string when omitted', async () => {
+    await getDoraTrend({ boardId: 'ACC', limit: 8 });
+
+    const [url] = mockFetch.mock.calls[0] as [string];
+    expect(url).not.toContain('sprintId=');
+    expect(url).not.toContain('mode=');
+  });
+});
+
+describe('getDoraAggregate — sprint mode params', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({}),
+    });
+  });
+
+  it('includes sprintId in query string when provided', async () => {
+    await getDoraAggregate({ boardId: 'ACC', sprintId: 'sprint-7' });
+
+    const [url] = mockFetch.mock.calls[0] as [string];
+    expect(url).toContain('sprintId=sprint-7');
+  });
+
+  it('does not include sprintId when omitted', async () => {
+    await getDoraAggregate({ boardId: 'ACC' });
+
+    const [url] = mockFetch.mock.calls[0] as [string];
+    expect(url).not.toContain('sprintId=');
+  });
+});

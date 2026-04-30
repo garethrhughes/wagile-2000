@@ -24,6 +24,7 @@ function mockSnapshotRepo(): jest.Mocked<Repository<DoraSnapshot>> {
 function mockBoardConfigRepo(boardIds = ['ACC']): jest.Mocked<Repository<BoardConfig>> {
   return {
     find: jest.fn().mockResolvedValue(boardIds.map((boardId) => ({ boardId }))),
+    findOne: jest.fn().mockResolvedValue({ boardType: 'scrum' }),
   } as unknown as jest.Mocked<Repository<BoardConfig>>;
 }
 
@@ -83,7 +84,7 @@ describe('InProcessSnapshotService', () => {
     );
   });
 
-  it('upserts five snapshot rows: per-board aggregate + trend + trend-display, org aggregate + trend', async () => {
+  it('upserts six snapshot rows: per-board aggregate + trend + trend-display + trend-sprint, org aggregate + trend', async () => {
     await service.computeAndPersist('ACC');
     // computeAndPersist calls computeBoard then computeOrg — two separate upserts
     expect(snapshotRepo.upsert).toHaveBeenCalledTimes(2);
@@ -91,11 +92,23 @@ describe('InProcessSnapshotService', () => {
     const allRows = (snapshotRepo.upsert.mock.calls as [Array<{ boardId: string; snapshotType: string }>, string[]][])
       .flatMap(([rows]) => rows);
 
-    expect(allRows).toHaveLength(5);
+    expect(allRows).toHaveLength(6);
     const perBoard = allRows.filter((r) => r.boardId === 'ACC');
     const org      = allRows.filter((r) => r.boardId === ORG_SNAPSHOT_KEY);
-    expect(perBoard.map((r) => r.snapshotType).sort()).toEqual(['aggregate', 'trend', 'trend-display']);
+    expect(perBoard.map((r) => r.snapshotType).sort()).toEqual(['aggregate', 'trend', 'trend-display', 'trend-sprint']);
     expect(org.map((r) => r.snapshotType).sort()).toEqual(['aggregate', 'trend']);
+  });
+
+  it('omits trend-sprint snapshot for Kanban boards', async () => {
+    boardConfigRepo.findOne = jest.fn().mockResolvedValue({ boardType: 'kanban' });
+    await service.computeBoard('PLAT');
+
+    const allRows = (snapshotRepo.upsert.mock.calls as [Array<{ boardId: string; snapshotType: string }>, string[]][])
+      .flatMap(([rows]) => rows);
+
+    const perBoard = allRows.filter((r) => r.boardId === 'PLAT');
+    expect(perBoard.map((r) => r.snapshotType).sort()).toEqual(['aggregate', 'trend', 'trend-display']);
+    expect(perBoard.find((r) => r.snapshotType === 'trend-sprint')).toBeUndefined();
   });
 
   it('stores the OrgDoraResult payload for the aggregate snapshot', async () => {
