@@ -523,7 +523,7 @@ export class SyncService {
           const entity = this.issueLinkRepo.create({
             sourceIssueKey: raw.key,
             targetIssueKey: link.inwardIssue.key,
-            linkTypeName: link.type.name,
+            linkTypeName: link.type.inward,
             isInward: true,
           });
           newLinks.push(entity);
@@ -532,7 +532,7 @@ export class SyncService {
           const entity = this.issueLinkRepo.create({
             sourceIssueKey: raw.key,
             targetIssueKey: link.outwardIssue.key,
-            linkTypeName: link.type.name,
+            linkTypeName: link.type.outward,
             isInward: false,
           });
           newLinks.push(entity);

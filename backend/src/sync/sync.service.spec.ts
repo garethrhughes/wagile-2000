@@ -762,6 +762,9 @@ describe('SyncService', () => {
 
       expect(issueLinkRepo.delete).toHaveBeenCalledWith({ sourceIssueKey: 'PROJ-1' });
       expect(issueLinkRepo.save).toHaveBeenCalled();
+      const savedInwardLinks = issueLinkRepo.save.mock.calls[0][0] as JiraIssueLink[];
+      expect(savedInwardLinks[0].linkTypeName).toBe('is blocked by');
+      expect(savedInwardLinks[0].isInward).toBe(true);
     });
 
     it('saves outward issue links', async () => {
@@ -782,6 +785,7 @@ describe('SyncService', () => {
 
       expect(issueLinkRepo.save).toHaveBeenCalled();
       const savedLinks = issueLinkRepo.save.mock.calls[0][0] as JiraIssueLink[];
+      expect(savedLinks[0].linkTypeName).toBe('blocks');
       expect(savedLinks[0].isInward).toBe(false);
     });
 
