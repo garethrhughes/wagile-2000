@@ -140,7 +140,7 @@ export class SyncService {
     }
   }
 
-  @Cron('0 */30 * * * *')
+  @Cron('0 0 * * *')
   async handleCron(): Promise<void> {
     this.logger.log('Scheduled sync triggered');
     await this.syncAll();

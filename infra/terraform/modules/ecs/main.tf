@@ -80,7 +80,8 @@ resource "aws_ecs_task_definition" "backend" {
         { name = "FRONTEND_URL",              value = var.frontend_url },
         { name = "DORA_SNAPSHOT_LAMBDA_NAME", value = var.dora_snapshot_lambda_name },
         { name = "AWS_REGION",                value = var.aws_region },
-        { name = "USE_LAMBDA",                value = "true" },
+        { name = "USE_LAMBDA",                       value = "true" },
+        { name = "SNAPSHOT_STALE_THRESHOLD_MINUTES", value = "2880" },
       ]
 
       secrets = [

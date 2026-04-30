@@ -125,7 +125,7 @@ resource "aws_lambda_function" "dora_snapshot" {
   runtime     = "nodejs20.x"
   handler     = "lambda/index.handler"
   timeout     = 300
-  memory_size = 1024
+  memory_size = 3008
 
   lifecycle {
     precondition {
