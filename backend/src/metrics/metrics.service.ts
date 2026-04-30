@@ -88,15 +88,9 @@ export class MetricsService {
     let { startDate, endDate } = this.resolvePeriod(query);
     const boardIds = await this.resolveBoardIds(query.boardId);
 
-    // If sprintId is provided, resolve dates from the sprint record
+    // If sprintId is provided, resolve dates from the sprint record.
     if (query.sprintId) {
-      const sprint = await this.sprintRepo.findOne({
-        where: { id: query.sprintId },
-      });
-      if (sprint?.startDate && sprint?.endDate) {
-        startDate = sprint.startDate;
-        endDate = sprint.endDate;
-      }
+      ({ startDate, endDate } = await this.resolveSprintDates(query.sprintId, startDate, endDate));
     }
 
     const results: DoraMetricsResult[] = [];

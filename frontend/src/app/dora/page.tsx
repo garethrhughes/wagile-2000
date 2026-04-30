@@ -29,7 +29,6 @@ import { useBoardsStore } from '@/store/boards-store'
 import { OrgMetricCard } from '@/components/ui/org-metric-card'
 import { BoardBreakdownTable } from '@/components/ui/board-breakdown-table'
 import { BoardChip } from '@/components/ui/board-chip'
-import { ToggleChip } from '@/components/ui/toggle-chip'
 import { EmptyState } from '@/components/ui/empty-state'
 import { NoBoardsConfigured } from '@/components/ui/no-boards-configured'
 import { MetricHelp, type MetricDefinition } from '@/components/ui/metric-help'
@@ -216,7 +215,6 @@ function DoraPageInner() {
     [boardsParam, allBoards],
   )
   const periodType = (searchParams.get('mode') ?? 'quarter') as 'sprint' | 'quarter'
-  const sprintId = searchParams.get('sprintId') ?? undefined
 
   const [pageState, setPageState] = useState<PageState>({ status: 'idle' })
   const [retryKey, setRetryKey] = useState(0)
@@ -265,19 +263,23 @@ function DoraPageInner() {
       const boardId = debouncedBoards.join(',')
       const isSprintMode = periodType === 'sprint'
       try {
-        // Fetch trend first so we can align the aggregate window to the rightmost
-        // chart point using the server's timezone, not the browser's local date.
         const trend = await getDoraTrend({
           boardId,
           limit: 8,
           ...(isSprintMode ? { mode: 'sprint' as const } : {}),
         })
         if (cancelled) return
-        const aggregate = await getDoraAggregate({
-          boardId,
-          // sprintId scopes the aggregate to a single sprint when explicitly selected
-          ...(isSprintMode && sprintId !== undefined ? { sprintId } : {}),
-        })
+
+        // In sprint mode the aggregate cards reflect the most recent sprint.
+        // TrendPoint is the same shape as OrgDoraResult so we reuse the last
+        // trend point directly — avoids a second call that would return quarter data.
+        let aggregate: OrgDoraResult
+        if (isSprintMode && trend.length > 0) {
+          aggregate = trend[trend.length - 1]!
+        } else {
+          aggregate = await getDoraAggregate({ boardId })
+          if (cancelled) return
+        }
         if (!cancelled) {
           // Backend guarantees oldest→newest order (ADR-0042 §5).
           // Do not reverse here — the array is already in the correct
@@ -301,7 +303,7 @@ function DoraPageInner() {
     return () => {
       cancelled = true
     }
-  }, [debouncedBoards, retryKey, periodType, sprintId])
+  }, [debouncedBoards, retryKey, periodType])
 
   // RC-5: extract sparklines from TrendPoint[] per metric
   const dfSparkline = useMemo(
@@ -390,30 +392,45 @@ function DoraPageInner() {
           <label className="mb-2 block text-sm font-medium text-muted">
             Period
           </label>
-          <div className="inline-flex gap-1">
-            <ToggleChip
-              label="Quarter"
-              selected={periodType === 'quarter'}
+          <div className="inline-flex rounded-lg border border-border">
+            <button
+              type="button"
               onClick={() => replaceParams({ mode: 'quarter' })}
-            />
-            <ToggleChip
-              label="Sprint"
-              selected={periodType === 'sprint'}
+              className={`rounded-l-lg px-4 py-2 text-sm font-medium transition-colors ${
+                periodType === 'quarter'
+                  ? 'bg-interactive-selected-bg text-interactive-selected-fg'
+                  : 'text-muted hover:bg-interactive-hover-bg'
+              }`}
+            >
+              Quarter
+            </button>
+            <button
+              type="button"
               disabled={mounted && !sprintModeAvailable}
               onClick={() => {
                 if (sprintModeAvailable) replaceParams({ mode: 'sprint' })
               }}
-            />
+              className={`rounded-r-lg px-4 py-2 text-sm font-medium transition-colors ${
+                periodType === 'sprint'
+                  ? 'bg-interactive-selected-bg text-interactive-selected-fg'
+                  : mounted && !sprintModeAvailable
+                    ? 'cursor-not-allowed text-muted opacity-40'
+                    : 'text-muted hover:bg-interactive-hover-bg'
+              }`}
+            >
+              Sprint
+            </button>
           </div>
           {mounted && !sprintModeAvailable && (
             <p className="mt-2 text-xs text-muted">Sprint mode requires a single Scrum board</p>
           )}
           {periodType === 'sprint' && selectedBoards.length === 1 && (
             <p className="mt-1 text-xs text-muted">
-              Showing last 8 periods for {selectedBoards[0]}
+              Showing last 8 sprints for {selectedBoards[0]}
             </p>
           )}
         </div>
+
       </div>
 
       {/* Amber banner for default CFR config */}

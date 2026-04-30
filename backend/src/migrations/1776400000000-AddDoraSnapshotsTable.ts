@@ -7,7 +7,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * results written by the Lambda snapshot worker (or the in-process fallback).
  *
  * One row per (boardId, snapshotType) composite primary key.
- * snapshotType is either 'aggregate' or 'trend'.
+ * snapshotType is one of: 'aggregate', 'trend', 'trend-display', 'trend-sprint'.
  */
 export class AddDoraSnapshotsTable1776400000000 implements MigrationInterface {
   name = 'AddDoraSnapshotsTable1776400000000';

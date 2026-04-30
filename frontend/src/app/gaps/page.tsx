@@ -227,17 +227,11 @@ export default function GapsPage() {
       <div className="rounded-xl border border-border bg-card p-4">
         <label className="mb-2 block text-sm font-medium text-muted">Board</label>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setSelectedBoard(null)}
-            className={`rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
-              selectedBoard === null
-                ? 'border-interactive-selected-border bg-interactive-selected-bg text-interactive-selected-fg'
-                : 'border-border text-muted hover:bg-interactive-hover-bg'
-            }`}
-          >
-            All
-          </button>
+          <BoardChip
+              boardId="All"
+              selected={selectedBoard === null}
+              onClick={() => setSelectedBoard(null)}
+            />
           {allBoards.map((boardId) => (
             <BoardChip
               key={boardId}

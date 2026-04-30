@@ -45,3 +45,7 @@ infra/terraform/**/*.tfvars
 infra/terraform/**/.terraform/
 infra/terraform/**/.terraform.lock.hcl
 
+# Lambda build artefacts — produced by `make lambda-build`, uploaded to S3 by Terraform.
+# Never commit binary zips; they inflate repo size and are always reproducible from source.
+backend/snapshot-worker.zip
+
