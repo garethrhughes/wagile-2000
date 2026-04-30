@@ -191,9 +191,20 @@ export class MetricsService {
     // Sprint mode: bypass quarter-keyed cache and use sprint dates directly.
     if (query.sprintId) {
       const sprint = await this.sprintRepo.findOne({ where: { id: query.sprintId } });
-      const startDate = sprint?.startDate ?? (() => { const d = new Date(); d.setDate(d.getDate() - 14); return d; })();
-      const endDate = sprint?.endDate ?? new Date();
-      const sprintLabel = sprint?.name ?? query.sprintId;
+
+      if (!sprint) {
+        throw new BadRequestException(`Invalid sprintId: sprint "${query.sprintId}" was not found`);
+      }
+
+      if (!sprint.startDate || !sprint.endDate) {
+        throw new BadRequestException(
+          `Invalid sprintId: sprint "${query.sprintId}" is missing startDate or endDate`,
+        );
+      }
+
+      const startDate = sprint.startDate;
+      const endDate = sprint.endDate;
+      const sprintLabel = sprint.name;
       const boardIds = await this.resolveBoardIds(query.boardId);
 
       const boardResults = await Promise.all(
