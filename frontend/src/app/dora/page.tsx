@@ -216,6 +216,7 @@ function DoraPageInner() {
     [boardsParam, allBoards],
   )
   const periodType = (searchParams.get('mode') ?? 'quarter') as 'sprint' | 'quarter'
+  const sprintId = searchParams.get('sprintId') ?? undefined
 
   const [pageState, setPageState] = useState<PageState>({ status: 'idle' })
   const [retryKey, setRetryKey] = useState(0)
@@ -223,6 +224,9 @@ function DoraPageInner() {
   // Debounce board selection so rapid multi-board toggles don't fire a fetch
   // for every intermediate state. Chips update immediately; fetch waits 400 ms.
   const debouncedBoards = useDebounce(selectedBoards, 400)
+
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
 
   const reload = useCallback(() => {
     setRetryKey((k) => k + 1)
@@ -238,12 +242,16 @@ function DoraPageInner() {
     [selectedBoards, kanbanBoardIds, boardsStatus],
   )
 
-  // Auto-reset to quarter when sprint mode becomes unavailable
+  // Auto-reset to quarter when sprint mode becomes unavailable.
+  // Only fires once the boards store is ready — avoids resetting on first render
+  // before the store has hydrated, which would cause a hydration mismatch and
+  // clear a valid ?mode=sprint param before the fetch runs.
   useEffect(() => {
+    if (boardsStatus !== 'ready') return
     if (!sprintModeAvailable && periodType === 'sprint') {
       replaceParams({ mode: 'quarter' })
     }
-  }, [sprintModeAvailable, periodType, replaceParams])
+  }, [boardsStatus, sprintModeAvailable, periodType, replaceParams])
 
   // Main data fetch — fires on filter change or retry
   useEffect(() => {
@@ -255,12 +263,21 @@ function DoraPageInner() {
       }
       setPageState({ status: 'loading' })
       const boardId = debouncedBoards.join(',')
+      const isSprintMode = periodType === 'sprint'
       try {
         // Fetch trend first so we can align the aggregate window to the rightmost
         // chart point using the server's timezone, not the browser's local date.
-        const trend = await getDoraTrend({ boardId, limit: 8 })
+        const trend = await getDoraTrend({
+          boardId,
+          limit: 8,
+          ...(isSprintMode ? { mode: 'sprint' as const } : {}),
+        })
         if (cancelled) return
-        const aggregate = await getDoraAggregate({ boardId })
+        const aggregate = await getDoraAggregate({
+          boardId,
+          // sprintId scopes the aggregate to a single sprint when explicitly selected
+          ...(isSprintMode && sprintId !== undefined ? { sprintId } : {}),
+        })
         if (!cancelled) {
           // Backend guarantees oldest→newest order (ADR-0042 §5).
           // Do not reverse here — the array is already in the correct
@@ -284,7 +301,7 @@ function DoraPageInner() {
     return () => {
       cancelled = true
     }
-  }, [debouncedBoards, retryKey])
+  }, [debouncedBoards, retryKey, periodType, sprintId])
 
   // RC-5: extract sparklines from TrendPoint[] per metric
   const dfSparkline = useMemo(
@@ -382,13 +399,13 @@ function DoraPageInner() {
             <ToggleChip
               label="Sprint"
               selected={periodType === 'sprint'}
-              disabled={!sprintModeAvailable}
+              disabled={mounted && !sprintModeAvailable}
               onClick={() => {
                 if (sprintModeAvailable) replaceParams({ mode: 'sprint' })
               }}
             />
           </div>
-          {!sprintModeAvailable && (
+          {mounted && !sprintModeAvailable && (
             <p className="mt-2 text-xs text-muted">Sprint mode requires a single Scrum board</p>
           )}
           {periodType === 'sprint' && selectedBoards.length === 1 && (

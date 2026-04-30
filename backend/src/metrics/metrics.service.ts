@@ -133,7 +133,10 @@ export class MetricsService {
   async getDeploymentFrequency(
     query: MetricsQueryDto,
   ): Promise<DeploymentFrequencyResult[]> {
-    const { startDate, endDate } = this.resolvePeriod(query);
+    let { startDate, endDate } = this.resolvePeriod(query);
+    if (query.sprintId) {
+      ({ startDate, endDate } = await this.resolveSprintDates(query.sprintId, startDate, endDate));
+    }
     const boardIds = await this.resolveBoardIds(query.boardId);
 
     return Promise.all(
@@ -144,7 +147,10 @@ export class MetricsService {
   }
 
   async getLeadTime(query: MetricsQueryDto): Promise<LeadTimeResult[]> {
-    const { startDate, endDate } = this.resolvePeriod(query);
+    let { startDate, endDate } = this.resolvePeriod(query);
+    if (query.sprintId) {
+      ({ startDate, endDate } = await this.resolveSprintDates(query.sprintId, startDate, endDate));
+    }
     const boardIds = await this.resolveBoardIds(query.boardId);
 
     return Promise.all(
@@ -155,7 +161,10 @@ export class MetricsService {
   }
 
   async getCfr(query: MetricsQueryDto): Promise<CfrResult[]> {
-    const { startDate, endDate } = this.resolvePeriod(query);
+    let { startDate, endDate } = this.resolvePeriod(query);
+    if (query.sprintId) {
+      ({ startDate, endDate } = await this.resolveSprintDates(query.sprintId, startDate, endDate));
+    }
     const boardIds = await this.resolveBoardIds(query.boardId);
 
     return Promise.all(
@@ -166,7 +175,10 @@ export class MetricsService {
   }
 
   async getMttr(query: MetricsQueryDto): Promise<MttrResult[]> {
-    const { startDate, endDate } = this.resolvePeriod(query);
+    let { startDate, endDate } = this.resolvePeriod(query);
+    if (query.sprintId) {
+      ({ startDate, endDate } = await this.resolveSprintDates(query.sprintId, startDate, endDate));
+    }
     const boardIds = await this.resolveBoardIds(query.boardId);
 
     return Promise.all(
@@ -182,6 +194,58 @@ export class MetricsService {
   // ---------------------------------------------------------------------------
 
   async getDoraAggregate(query: DoraAggregateQueryDto): Promise<OrgDoraResult> {
+    // Sprint mode: bypass quarter-keyed cache and use sprint dates directly.
+    if (query.sprintId) {
+      const sprint = await this.sprintRepo.findOne({ where: { id: query.sprintId } });
+      const startDate = sprint?.startDate ?? (() => { const d = new Date(); d.setDate(d.getDate() - 14); return d; })();
+      const endDate = sprint?.endDate ?? new Date();
+      const sprintLabel = sprint?.name ?? query.sprintId;
+      const boardIds = await this.resolveBoardIds(query.boardId);
+
+      const boardResults = await Promise.all(
+        boardIds.map(async (boardId) => {
+          const [df, cfr, ltResult, mttrObsResult, boardConfig] = await Promise.all([
+            this.deploymentFrequencyService.calculate(boardId, startDate, endDate),
+            this.cfrService.calculate(boardId, startDate, endDate),
+            this.leadTimeService.getLeadTimeObservations(boardId, startDate, endDate),
+            this.mttrService.getMttrObservations(boardId, startDate, endDate),
+            this.boardConfigRepo.findOne({ where: { boardId } }),
+          ]);
+
+          const ltObs = ltResult.observations;
+          const ltAnomalyCount = ltResult.anomalyCount;
+          const mttrObs = mttrObsResult.recoveryHours;
+          const mttrOpenCount = mttrObsResult.openIncidentCount;
+          const mttrAnomalyCount = mttrObsResult.anomalyCount;
+
+          const ltMedian = percentile(ltObs, 50);
+          const ltP95 = percentile(ltObs, 95);
+          const lt: LeadTimeResult = {
+            boardId,
+            medianDays: round2(ltMedian),
+            p95Days: round2(ltP95),
+            band: classifyLeadTime(ltMedian),
+            sampleSize: ltObs.length,
+            anomalyCount: ltAnomalyCount,
+          };
+
+          const mttrMedianVal = percentile(mttrObs, 50);
+          const mttr: MttrResult = {
+            boardId,
+            medianHours: round2(mttrMedianVal),
+            band: classifyMTTR(mttrMedianVal),
+            incidentCount: mttrObs.length,
+            openIncidentCount: mttrOpenCount,
+            anomalyCount: mttrAnomalyCount,
+          };
+
+          return { boardId, df, cfr, lt, mttr, ltObs, mttrObs, boardConfig };
+        }),
+      );
+
+      return this.buildOrgDoraResult(boardResults, startDate, endDate, sprintLabel);
+    }
+
     // ---------------------------------------------------------------------------
     // Cache look-up — avoid re-running expensive multi-table DB queries on every
     // HTTP request.  TTL is 60 s; this is fine because DORA metrics are computed
@@ -272,7 +336,60 @@ export class MetricsService {
   // ---------------------------------------------------------------------------
 
   async getDoraTrend(query: DoraTrendQueryDto): Promise<TrendResponse> {
-    // Cache look-up — serve repeated page loads instantly
+    const limit = query.limit ?? 8;
+
+    // -----------------------------------------------------------------------
+    // Sprint mode — one data point per closed sprint, ordered oldest → newest.
+    // Requires a single boardId; Kanban boards are rejected.
+    // -----------------------------------------------------------------------
+    if (query.mode === 'sprint') {
+      if (!query.boardId) {
+        throw new BadRequestException(
+          'Sprint trend mode requires a single boardId.',
+        );
+      }
+      const boardId = query.boardId.trim();
+      const boardConfig = await this.boardConfigRepo.findOne({ where: { boardId } });
+      if (boardConfig?.boardType === 'kanban') {
+        throw new BadRequestException(
+          `Sprint trend mode requires a Scrum board. ${boardId} is a Kanban board.`,
+        );
+      }
+
+      const sprints = await this.sprintRepo.find({
+        where: { boardId, state: 'closed' },
+        order: { endDate: 'DESC' },
+        take: limit,
+      });
+
+      if (sprints.length === 0) return [];
+
+      // Build one OrgDoraResult per sprint using the TrendDataLoader for the
+      // full sprint range, then fan out to per-sprint in-memory calculation.
+      const rangeStart = sprints.reduce(
+        (min, s) => (s.startDate && s.startDate < min ? s.startDate : min),
+        sprints[0].startDate ?? new Date(),
+      );
+      const rangeEnd = sprints.reduce(
+        (max, s) => (s.endDate && s.endDate > max ? s.endDate : max),
+        sprints[0].endDate ?? new Date(),
+      );
+
+      const slices = await Promise.all(
+        [boardId].map((bid) => this.trendDataLoader.load(bid, rangeStart, rangeEnd)),
+      );
+
+      const points = sprints.map((sprint): OrgDoraResult => {
+        const start = sprint.startDate ?? rangeStart;
+        const end = sprint.endDate ?? rangeEnd;
+        return this.buildOrgDoraResultFromData(slices, start, end, sprint.name);
+      });
+
+      // Return oldest → newest (sprints were fetched newest-first)
+      return points.reverse();
+    }
+
+    // Cache look-up — serve repeated page loads instantly (quarter mode only)
     const trendCacheKey = DoraCacheService.buildKey(
       {
         boardId: query.boardId,
@@ -285,7 +402,6 @@ export class MetricsService {
       return cachedTrend;
     }
 
-    const limit = query.limit ?? 8;
     const boardIds = await this.resolveBoardIds(query.boardId);
 
     // Quarter mode
@@ -450,6 +566,22 @@ export class MetricsService {
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Resolves start/end dates from a sprint record. Falls back to the provided
+   * defaults if the sprint cannot be found or has no dates set.
+   */
+  private async resolveSprintDates(
+    sprintId: string,
+    fallbackStart: Date,
+    fallbackEnd: Date,
+  ): Promise<{ startDate: Date; endDate: Date }> {
+    const sprint = await this.sprintRepo.findOne({ where: { id: sprintId } });
+    if (sprint?.startDate && sprint?.endDate) {
+      return { startDate: sprint.startDate, endDate: sprint.endDate };
+    }
+    return { startDate: fallbackStart, endDate: fallbackEnd };
+  }
 
   private async resolveBoardIds(boardId: string | undefined): Promise<string[]> {
     if (boardId) {

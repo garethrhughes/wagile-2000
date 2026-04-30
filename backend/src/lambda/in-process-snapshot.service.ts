@@ -53,6 +53,12 @@ export class InProcessSnapshotService {
   async computeBoard(boardId: string): Promise<void> {
     const currentQuarter = listRecentQuarters(1)[0].label;
 
+    const boardConfig = await this.boardConfigRepo.findOne({
+      where: { boardId },
+      select: ['boardType'],
+    });
+    const isKanban = boardConfig?.boardType === 'kanban';
+
     const [boardAggregate, boardTrend] = await Promise.all([
       this.metricsService.getDoraAggregate({ boardId, quarter: currentQuarter }),
       this.metricsService.getDoraTrend({ boardId, limit: TREND_QUARTERS }),
@@ -63,32 +69,54 @@ export class InProcessSnapshotService {
     // for per-board views. Reuse it directly to avoid redundant DB queries.
     const trendDisplay = boardTrend;
 
-    await this.snapshotRepo.upsert(
-      [
-        {
-          boardId,
-          snapshotType: 'aggregate' as const,
-          payload: boardAggregate,
-          triggeredBy: boardId,
-          stale: false,
-        },
-        {
-          boardId,
-          snapshotType: 'trend' as const,
-          payload: boardTrend,
-          triggeredBy: boardId,
-          stale: false,
-        },
-        {
-          boardId,
-          snapshotType: 'trend-display' as const,
-          payload: trendDisplay,
-          triggeredBy: boardId,
-          stale: false,
-        },
-      ],
-      ['boardId', 'snapshotType'],
-    );
+    const rows: Array<{
+      boardId: string;
+      snapshotType: 'aggregate' | 'trend' | 'trend-display' | 'trend-sprint';
+      payload: object;
+      triggeredBy: string;
+      stale: boolean;
+    }> = [
+      {
+        boardId,
+        snapshotType: 'aggregate',
+        payload: boardAggregate,
+        triggeredBy: boardId,
+        stale: false,
+      },
+      {
+        boardId,
+        snapshotType: 'trend',
+        payload: boardTrend,
+        triggeredBy: boardId,
+        stale: false,
+      },
+      {
+        boardId,
+        snapshotType: 'trend-display',
+        payload: trendDisplay,
+        triggeredBy: boardId,
+        stale: false,
+      },
+    ];
+
+    // trend-sprint: one data point per closed sprint (Scrum boards only).
+    // Kanban boards have no sprints — skip to avoid a BadRequestException.
+    if (!isKanban) {
+      const sprintTrend = await this.metricsService.getDoraTrend({
+        boardId,
+        limit: TREND_QUARTERS,
+        mode: 'sprint',
+      });
+      rows.push({
+        boardId,
+        snapshotType: 'trend-sprint',
+        payload: sprintTrend,
+        triggeredBy: boardId,
+        stale: false,
+      });
+    }
+
+    await this.snapshotRepo.upsert(rows, ['boardId', 'snapshotType']);
 
     this.logger.log(`Per-board snapshots persisted for board ${boardId}`);
   }

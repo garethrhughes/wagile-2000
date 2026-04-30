@@ -640,6 +640,200 @@ describe('MetricsService', () => {
   // getDoraTrend — caching behaviour
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // getDoraTrend — sprint mode
+  // -------------------------------------------------------------------------
+
+  describe('getDoraTrend (sprint mode)', () => {
+    const makeSprint = (id: string, name: string, start: string, end: string): JiraSprint =>
+      ({
+        id,
+        boardId: 'ACC',
+        name,
+        state: 'closed',
+        startDate: new Date(start),
+        endDate: new Date(end),
+      }) as unknown as JiraSprint;
+
+    it('returns one trend point per closed sprint ordered oldest → newest', async () => {
+      sprintRepo.find.mockResolvedValue([
+        makeSprint('s2', 'Sprint 2', '2026-02-01T00:00:00Z', '2026-02-14T23:59:59Z'),
+        makeSprint('s1', 'Sprint 1', '2026-01-01T00:00:00Z', '2026-01-14T23:59:59Z'),
+      ]); // DB returns newest-first (ORDER BY endDate DESC)
+
+      const points = await service.getDoraTrend({ boardId: 'ACC', mode: 'sprint', limit: 2 });
+
+      expect(points).toHaveLength(2);
+      // Oldest first
+      expect(points[0].period.label).toBe('Sprint 1');
+      expect(points[1].period.label).toBe('Sprint 2');
+      // Starts should be chronological
+      expect(new Date(points[0].period.start).getTime()).toBeLessThan(
+        new Date(points[1].period.start).getTime(),
+      );
+    });
+
+    it('throws BadRequestException in sprint mode without boardId', async () => {
+      await expect(
+        service.getDoraTrend({ mode: 'sprint', limit: 4 }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException in sprint mode for a Kanban board', async () => {
+      boardConfigRepo.findOne.mockResolvedValue({
+        boardId: 'PLAT',
+        boardType: 'kanban',
+      } as unknown as BoardConfig);
+
+      await expect(
+        service.getDoraTrend({ boardId: 'PLAT', mode: 'sprint', limit: 4 }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('returns empty array when no closed sprints found', async () => {
+      sprintRepo.find.mockResolvedValue([]);
+      const points = await service.getDoraTrend({ boardId: 'ACC', mode: 'sprint', limit: 4 });
+      expect(points).toEqual([]);
+    });
+
+    it('respects the limit param in sprint mode', async () => {
+      sprintRepo.find.mockResolvedValue([
+        makeSprint('s1', 'Sprint 1', '2026-01-01T00:00:00Z', '2026-01-14T23:59:59Z'),
+      ]);
+
+      await service.getDoraTrend({ boardId: 'ACC', mode: 'sprint', limit: 1 });
+
+      expect(sprintRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 1 }),
+      );
+    });
+
+    it('each sprint point carries OrgDoraResult fields', async () => {
+      sprintRepo.find.mockResolvedValue([
+        makeSprint('s1', 'Sprint 1', '2026-01-01T00:00:00Z', '2026-01-14T23:59:59Z'),
+      ]);
+
+      const points = await service.getDoraTrend({ boardId: 'ACC', mode: 'sprint', limit: 1 });
+      const p = points[0];
+
+      expect(p).toHaveProperty('period.label', 'Sprint 1');
+      expect(p).toHaveProperty('period.start');
+      expect(p).toHaveProperty('period.end');
+      expect(p).toHaveProperty('orgDeploymentFrequency.deploymentsPerDay');
+      expect(p).toHaveProperty('orgLeadTime.medianDays');
+      expect(p).toHaveProperty('orgChangeFailureRate.changeFailureRate');
+      expect(p).toHaveProperty('orgMttr.medianHours');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getDeploymentFrequency / getLeadTime / getCfr / getMttr — sprint branch
+  // -------------------------------------------------------------------------
+
+  describe('individual metric helpers — sprint branch', () => {
+    const sprintRecord: JiraSprint = {
+      id: 'sprint-99',
+      boardId: 'ACC',
+      name: 'Sprint 99',
+      state: 'closed',
+      startDate: new Date('2026-03-01T00:00:00Z'),
+      endDate: new Date('2026-03-14T23:59:59Z'),
+    } as unknown as JiraSprint;
+
+    beforeEach(() => {
+      sprintRepo.findOne.mockResolvedValue(sprintRecord);
+    });
+
+    it('getDeploymentFrequency resolves sprint dates when sprintId provided', async () => {
+      await service.getDeploymentFrequency({ boardId: 'ACC', sprintId: 'sprint-99' });
+
+      expect(sprintRepo.findOne).toHaveBeenCalledWith({ where: { id: 'sprint-99' } });
+      expect(dfService.calculate).toHaveBeenCalledWith(
+        'ACC',
+        sprintRecord.startDate,
+        sprintRecord.endDate,
+      );
+    });
+
+    it('getLeadTime resolves sprint dates when sprintId provided', async () => {
+      await service.getLeadTime({ boardId: 'ACC', sprintId: 'sprint-99' });
+
+      expect(ltService.calculate).toHaveBeenCalledWith(
+        'ACC',
+        sprintRecord.startDate,
+        sprintRecord.endDate,
+      );
+    });
+
+    it('getCfr resolves sprint dates when sprintId provided', async () => {
+      await service.getCfr({ boardId: 'ACC', sprintId: 'sprint-99' });
+
+      expect(cfrService.calculate).toHaveBeenCalledWith(
+        'ACC',
+        sprintRecord.startDate,
+        sprintRecord.endDate,
+      );
+    });
+
+    it('getMttr resolves sprint dates when sprintId provided', async () => {
+      await service.getMttr({ boardId: 'ACC', sprintId: 'sprint-99' });
+
+      expect(mttrService.calculate).toHaveBeenCalledWith(
+        'ACC',
+        sprintRecord.startDate,
+        sprintRecord.endDate,
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getDoraAggregate — sprint mode
+  // -------------------------------------------------------------------------
+
+  describe('getDoraAggregate (sprint mode)', () => {
+    it('resolves period from sprint dates when sprintId provided', async () => {
+      const sprintStart = new Date('2026-02-01T00:00:00Z');
+      const sprintEnd = new Date('2026-02-14T23:59:59Z');
+      sprintRepo.findOne.mockResolvedValue({
+        id: 'sprint-5',
+        boardId: 'ACC',
+        name: 'Sprint 5',
+        state: 'closed',
+        startDate: sprintStart,
+        endDate: sprintEnd,
+      } as unknown as JiraSprint);
+
+      const result = await service.getDoraAggregate({ boardId: 'ACC', sprintId: 'sprint-5' });
+
+      expect(sprintRepo.findOne).toHaveBeenCalledWith({ where: { id: 'sprint-5' } });
+      expect(result.orgDeploymentFrequency).toBeDefined();
+      // Period label should reflect sprint name, not a quarter key
+      expect(result.period.label).toBe('Sprint 5');
+    });
+
+    it('period start/end matches sprint dates', async () => {
+      const sprintStart = new Date('2026-02-01T00:00:00Z');
+      const sprintEnd = new Date('2026-02-14T23:59:59Z');
+      sprintRepo.findOne.mockResolvedValue({
+        id: 'sprint-5',
+        boardId: 'ACC',
+        name: 'Sprint 5',
+        state: 'closed',
+        startDate: sprintStart,
+        endDate: sprintEnd,
+      } as unknown as JiraSprint);
+
+      const result = await service.getDoraAggregate({ boardId: 'ACC', sprintId: 'sprint-5' });
+
+      expect(result.period.start).toBe(sprintStart.toISOString());
+      expect(result.period.end).toBe(sprintEnd.toISOString());
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getDoraTrend — caching behaviour
+  // -------------------------------------------------------------------------
+
   describe('getDoraTrend (caching)', () => {
     it('returns the same result on second call without calling TrendDataLoader again', async () => {
       const result1 = await service.getDoraTrend({ boardId: 'ACC', limit: 2 });
