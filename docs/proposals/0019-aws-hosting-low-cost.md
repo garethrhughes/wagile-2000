@@ -10,7 +10,7 @@ The Jira DORA & Planning Metrics Dashboard is an internal engineering tool used 
 It consists of:
 
 - **Frontend:** Next.js 16 (App Router, SSR + static pages)
-- **Backend:** NestJS 11 (REST API, scheduled Jira sync every 30 min, TypeORM)
+- **Backend:** NestJS 11 (REST API, scheduled Jira sync once daily at midnight, TypeORM)
 - **Database:** PostgreSQL 16
 - **Auth:** Single static API key (no OAuth, no user management)
 - **Traffic:** Low — handful of engineers, not public-facing
@@ -166,7 +166,7 @@ Not used in this codebase — no impact.
 ### Optimistic Concurrency Control (OCC)
 
 DSQL uses OCC instead of row-level locking. Concurrent writes to the same rows result in a
-serialization error rather than a blocked wait. The NestJS sync service runs on a 30-minute
+serialization error rather than a blocked wait. The NestJS sync service runs on a daily
 cron and is effectively single-writer, so conflict probability is very low. Add retry logic
 on `40001` (serialization failure) errors as a precaution.
 

@@ -686,8 +686,8 @@ different cases:
   payload with `X-Snapshot-Stale: true` and `X-Snapshot-Age: <seconds>` headers.
 - **Snapshot fresh**: return payload with `X-Snapshot-Age: <seconds>` header (always present).
 
-Staleness threshold: 60 minutes (2× the 30-minute sync interval). Configurable via
-`SNAPSHOT_STALE_THRESHOLD_MINUTES` env var; default 60.
+Staleness threshold: 48 hours (2× the daily sync interval). Configurable via
+`SNAPSHOT_STALE_THRESHOLD_MINUTES` env var; default 2880.
 
 #### New `DoraSnapshotReadService`
 

@@ -857,9 +857,9 @@ or deferred work:
    metrics. This is intentional — these are independent signal types that
    happen to share default values.
 
-5. **30-minute sync staleness.** Jira data is synced every ~30 minutes. A
+5. **Daily sync staleness.** Jira data is synced once daily at midnight. A
    change made in Jira (sprint start, issue completion) may not be reflected
-   for up to 30 minutes. All metric calculations operate on the cached state
+   for up to 24 hours. All metric calculations operate on the cached state
    at the time of the query.
 
 6. **Holiday exclusion uses tenant-local dates.** Holidays in `workingTime.holidays`
@@ -1651,9 +1651,9 @@ or deferred work:
    metrics. This is intentional — these are independent signal types that
    happen to share default values.
 
-5. **30-minute sync staleness.** Jira data is synced every ~30 minutes. A
+5. **Daily sync staleness.** Jira data is synced once daily at midnight. A
    change made in Jira (sprint start, issue completion) may not be reflected
-   for up to 30 minutes. All metric calculations operate on the cached state
+   for up to 24 hours. All metric calculations operate on the cached state
    at the time of the query.
 
 ---

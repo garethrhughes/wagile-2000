@@ -72,7 +72,7 @@ Settings UI — Delete Board
         └─► board removed from allBoards → chips disappear from all pages
 
 
-Scheduled sync (every 30 min) — syncAll()
+Scheduled sync (once daily at midnight) — syncAll()
   │
   └─► boardConfigRepo.find()  →  all board_configs rows
         │

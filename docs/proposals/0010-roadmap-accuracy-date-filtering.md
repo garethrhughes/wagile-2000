@@ -706,7 +706,7 @@ The JPD idea's own `targetDate` is the canonical source of the roadmap commitmen
 | API contract | None | `RoadmapSprintAccuracy` response shape is unchanged. Existing API consumers unaffected. |
 | Frontend | None | No component or type changes. |
 | Tests | New unit tests required | `RoadmapService` tests must cover: ideas with no dates (unchanged behaviour), ideas with only `targetDate`, ideas with both dates, issue completed before `startDate` (excluded), issue in-flight within window (included), multiple ideas same epic key (conflict resolution). |
-| Jira API | Additive field request | `getJpdIdeas()` adds 4 field names to the `fields` query param. No new endpoint. Rate-limit risk is minimal — JPD sync runs at most once per 30-minute cron cycle, same as today. |
+| Jira API | Additive field request | `getJpdIdeas()` adds 4 field names to the `fields` query param. No new endpoint. Rate-limit risk is minimal — JPD sync runs at most once per daily cron cycle, same as today. |
 | Sync | Minor change | `syncJpdProject()` extracts 2 additional fields per idea. No additional API calls. |
 | Backwards compatibility | Full | Ideas with null dates behave identically to the current implementation. No flag day. |
 

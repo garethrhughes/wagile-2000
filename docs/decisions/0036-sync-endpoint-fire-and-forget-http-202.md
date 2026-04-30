@@ -91,7 +91,7 @@ with the CloudFront timeout.
   receive stale data if it does not wait for sync completion. The client should poll
   `GET /api/sync/status` before treating the sync as complete.
 - If the Node.js process restarts during a sync, the in-progress sync is abandoned
-  silently. The scheduled cron sync (every 30 minutes) will recover on the next run.
+  silently. The scheduled cron sync (once daily at midnight) will recover on the next run.
 
 ### Risks
 

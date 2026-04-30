@@ -27,7 +27,7 @@ request.
     sync time and stored
   - Enables complex SQL aggregations not possible via the Jira API
 - **Cons:**
-  - Data is up to 30 minutes stale
+  - Data is up to 24 hours stale
   - Requires maintaining a sync pipeline and handling Jira API pagination/errors
   - Adds Postgres as a required infrastructure dependency
 
@@ -54,14 +54,14 @@ request.
 
 ## Decision
 
-> We will sync Jira data into a local Postgres database on a 30-minute cron schedule;
-> all metric calculations will query Postgres directly, never Jira.
+> We will sync Jira data into a local Postgres database on a daily cron schedule (once
+> per day at midnight); all metric calculations will query Postgres directly, never Jira.
 
 ## Rationale
 
 The rate-limit and latency constraints rule out live querying for a multi-board
 aggregation dashboard. Postgres was already required as the application database, so
-using it for the sync cache adds no new infrastructure. The 30-minute staleness window
+using it for the sync cache adds no new infrastructure. The daily staleness window
 is acceptable for DORA metrics, which are trend indicators rather than real-time
 operational data. Redis (Option C) would add infrastructure complexity without
 meaningfully solving the changelog reconstruction cost.
@@ -70,7 +70,7 @@ meaningfully solving the changelog reconstruction cost.
 
 - **Positive:** Fast, predictable dashboard load times; rate-limit safety; enables
   complex SQL-based metric aggregations; changelog snapshots computed once
-- **Negative / trade-offs:** Metrics lag real Jira state by up to 30 minutes; sync
+- **Negative / trade-offs:** Metrics lag real Jira state by up to 24 hours; sync
   failures can leave data stale until the next successful run
 - **Risks:** Jira API schema changes or pagination behaviour changes could silently
   break the sync; monitoring and alerting on sync job health is required

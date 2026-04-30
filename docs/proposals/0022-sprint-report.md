@@ -562,8 +562,8 @@ This prevents generating misleading composite scores for in-progress sprints.
 
 ### 7. Auto-Trigger Strategy
 
-The `SyncService` already runs a cron job every 30 minutes
-(`@Cron('0 */30 * * * *')`).  After each board sync completes, the sync service
+The `SyncService` already runs a cron job once daily at midnight
+(`@Cron('0 0 * * *')`).  After each board sync completes, the sync service
 already knows which sprints were updated.
 
 The proposed approach: `SprintReportService` exposes a
@@ -576,12 +576,12 @@ b. Has no existing row in `sprint_reports` for `(boardId, sprintId)`.
 
 This fires at most once per sprint.  A sprint that transitions from `active` to
 `closed` during a sync window will have its report generated on the next
-scheduled sync after closure, introducing at most ~30 minutes of delay.
+scheduled sync after closure, introducing at most ~24 hours of delay.
 
 **Why not a webhook or event?** Jira Cloud webhooks require an HTTPS callback
 URL.  The current architecture is a polling model; introducing a real-time
 trigger would add operational complexity disproportionate to the benefit.
-The 30-minute delay is acceptable for a closed-sprint report.
+The up-to-24-hour delay is acceptable for a closed-sprint report.
 
 **Why not on the sync scheduler itself?** Adding report generation to the
 `SyncService` cron is the simplest path, but it creates a dependency from

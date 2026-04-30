@@ -41,7 +41,7 @@ internet egress).
   Jira initiates from the NAT Gateway's static EIP; RDS remains in the private subnet
   with no public endpoint; ECS tasks remain in private subnets.
 - **Cons:** NAT Gateway has an hourly cost (~$0.059/hr in `ap-southeast-2`) and a
-  per-GB data processing charge. For an internal tool syncing Jira data every 30 minutes,
+   per-GB data processing charge. For an internal tool syncing Jira data once daily,
   this is on the order of ~$50/month.
 
 ### Option C — VPC Endpoint for all external traffic

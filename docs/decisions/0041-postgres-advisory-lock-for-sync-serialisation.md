@@ -8,10 +8,10 @@
 
 ECS Fargate can run multiple task instances simultaneously (horizontal scaling or
 rolling deployments), with a window where two tasks are live concurrently. With a
-scheduled cron sync (`@Cron('0 */30 * * * *')`) running on every task, two `syncAll()`
+scheduled cron sync (`@Cron('0 0 * * *')`) running on every task, two `syncAll()`
 calls can overlap:
 
-- **Same-cron overlap** — both instances fire their cron at the same 30-minute mark.
+- **Same-cron overlap** — both instances fire their cron at the same daily midnight mark.
 - **Deployment overlap** — the old task is still running a sync when the new task
   starts and triggers its startup sync or the next cron fires.
 
@@ -105,7 +105,7 @@ The non-blocking `pg_try_advisory_lock` variant is preferred over the blocking
 `pg_advisory_lock` to avoid queueing sync runs: a queued sync that begins after the
 first one completes would re-sync data that was just fetched, wasting Jira API quota.
 A fast rejection (409) is preferable — the cron on the losing instance simply skips
-that cycle and will retry at the next 30-minute mark.
+that cycle and will retry at the next daily midnight mark.
 
 Session-level locking is appropriate here: the lock scope matches the desired behaviour
 (one sync at a time across all instances), and session locks are automatically released

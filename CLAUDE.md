@@ -293,7 +293,7 @@ and update the proposal status to `Accepted`.
 
 ## Jira Sync
 
-- Scheduled via `@nestjs/schedule` cron — default every 30 minutes
+- Scheduled via `@nestjs/schedule` cron — default once daily at midnight
 - `POST /api/sync` triggers a manual refresh
 - `SyncLog` records each run (boardId, syncedAt, issueCount, status)
 - Show last-synced timestamp in UI header

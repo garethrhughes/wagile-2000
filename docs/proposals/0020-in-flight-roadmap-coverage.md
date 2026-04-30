@@ -380,7 +380,7 @@ but the roadmap item HAS lapsed should still show as linked but not covered."
 
 ### E7 — Issue transitions to Done between syncs
 
-The sync runs every 30 minutes. Between syncs, an issue may complete. On the next
+The sync runs once daily at midnight. Between syncs, an issue may complete. On the next
 sync, `issue.status` will update to a done status name, `completionDates` will be
 populated from the new changelog, and Condition A will take over from Condition B.
 There is no double-counting — either A or B fires, not both, since Condition B
@@ -391,7 +391,7 @@ requires `!doneStatusNames.includes(issue.status)`.
 `todayStart` is computed once per call to `calculateSprintAccuracy` via `new
 Date()`. For the rare edge case where a request spans a day boundary, the worst
 outcome is that a sprint that expired at midnight shows as covered for the
-fraction of a request before midnight. This is negligible for a 30-minute sync
+fraction of a request before midnight. This is negligible for a daily sync
 cadence and a ~200ms request.
 
 ### E9 — Sprint is active but `sprint.startDate` is null
@@ -469,14 +469,14 @@ sees contradictory data. Both services must apply the same classification logic.
 
 ### Alternative D — Re-query sprint `state` live from Jira instead of trusting the cached value
 
-`JiraSprint.state` is synced from Jira on each 30-minute sync cycle. Between
+`JiraSprint.state` is synced from Jira on each daily sync cycle. Between
 syncs, a sprint could be manually completed or started via the Jira UI, causing
 a brief inconsistency.
 
 **Ruled out.** The entire codebase relies on cached sprint state for planning
 accuracy, coverage, and detail views. A live re-query would break the
 single-JiraClient-gateway principle and add latency to every coverage request.
-The 30-minute staleness window is accepted throughout the codebase.
+The daily staleness window is accepted throughout the codebase.
 
 ---
 

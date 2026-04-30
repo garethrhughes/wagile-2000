@@ -85,7 +85,7 @@ Browser
   └──► CloudFront (60s origin timeout)
           └──► App Runner: NestJS backend (1 vCPU / 2 GB, heap cap 1800 MB)
                  │
-                 ├── @Cron('0 */30 * * * *')  → SyncService.syncAll()   ← memory spike here
+                 ├── @Cron('0 0 * * *')  → SyncService.syncAll()   ← memory spike here
                  ├── POST /api/sync            → SyncService.syncAll() [fire-and-forget]
                  ├── MetricsService            → on-the-fly calc from RDS ← concurrent with above
                  │     └── TrendDataLoader     → 4 queries/board, in-memory fan-out
@@ -350,7 +350,7 @@ state, and the snapshot read path. This is a trivially small memory footprint �
 **Architecture diagram:**
 
 ```
-EventBridge Scheduler (every 30 min)
+EventBridge Scheduler (once daily at midnight)
   │  OR  POST /api/sync → SyncController → SFN StartExecution (202)
   ▼
 Step Functions State Machine
@@ -649,7 +649,7 @@ This makes OOM crashes immediately visible rather than discovered retrospectivel
    on config PUT, (b) mark snapshot stale and let the next sync refresh it, (c) store
    a config hash in the snapshot and compare on read. Recommendation: option (a) — call
    `lambda.invoke({ boardId })` in the board config PUT handler. This ensures the DORA
-   page reflects config changes immediately without waiting 30 minutes.
+   page reflects config changes immediately without waiting until the next daily sync.
 
 5. **RDS connectivity from Lambda**: the Lambda must be in the same VPC private subnet as
    the App Runner backend and must have an inbound security group rule from the Lambda's

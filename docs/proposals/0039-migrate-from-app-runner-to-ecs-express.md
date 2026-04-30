@@ -506,7 +506,7 @@ primitives with less boilerplate.
 
 ### Alternative B -- AWS Lambda + API Gateway (serverless)
 
-The NestJS backend runs a 30-minute cron job for Jira sync and holds database connections.
+The NestJS backend runs a daily cron job for Jira sync and holds database connections.
 Lambda's 15-minute execution limit and cold-start latency make it unsuitable for the
 backend. The DORA snapshot Lambda already demonstrates this constraint -- it is a
 purpose-built, short-lived function. The frontend (Next.js standalone) could theoretically

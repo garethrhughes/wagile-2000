@@ -974,7 +974,7 @@ to add aggregation methods to the existing `MetricsService`.
 
 After each sync, compute and cache the org-level DORA metrics in a new `dora_snapshots` table.
 
-**Why ruled out:** Premature optimisation. The current sync runs every 30 minutes for 6 boards.
+**Why ruled out:** Premature optimisation. The current sync runs once daily at midnight for 6 boards.
 On-demand computation at query time is sufficient for a single-user internal tool. A snapshot
 table adds migration complexity, cache invalidation concerns, and a sync dependency. This can be
 revisited if query times become unacceptable (>2s) with real data volumes.

@@ -478,7 +478,7 @@ without requiring a join table.
 | API contract | Additive | Five new endpoints under `/api/roadmap/*`. No existing endpoints changed. |
 | Frontend | New page + settings section + sidebar item | New `roadmap/page.tsx`; additions to `settings/page.tsx` and `sidebar.tsx`; new types in `api.ts`. |
 | Tests | New unit tests | `RoadmapService.getAccuracy()` requires unit tests covering: no JPD config, Kanban board, zero epics, partial coverage, 100 % coverage. |
-| Jira API | New endpoint | `GET /rest/api/3/search/jql` with `project={jpdKey}` — same endpoint already used by `searchIssues()`. Additional `parent` field added to existing sprint/kanban issue fetches. Rate-limit risk is low: JPD sync runs at most once per 30-minute cron cycle. |
+| Jira API | New endpoint | `GET /rest/api/3/search/jql` with `project={jpdKey}` — same endpoint already used by `searchIssues()`. Additional `parent` field added to existing sprint/kanban issue fetches. Rate-limit risk is low: JPD sync runs at most once per daily cron cycle. |
 | `SyncService` | Modified | `mapJiraIssue()` updated; `syncAll()` extended; two new repositories injected. No breaking changes to existing callers. |
 | `AppModule` | Additive | `RoadmapModule` added to imports array. |
 
