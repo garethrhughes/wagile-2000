@@ -1,6 +1,6 @@
 # Decision Log
 
-This directory contains Architecture Decision Records (ADRs) for the wagile-2000
+This directory contains Architecture Decision Records (ADRs) for the Fragile
 DORA & Planning Metrics Dashboard project. Each file documents a significant
 technical or architectural decision, the options that were considered, and the
 rationale for the choice made.
