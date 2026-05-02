@@ -1,0 +1,187 @@
+# CLAUDE.md — [Project Name]
+
+## Project Overview
+
+[Short description: what does this system do, who uses it, what problem does it solve?]
+
+---
+
+## Tech Stack
+
+### Backend
+| Concern | Choice |
+|---|---|
+| Framework | [fill in] |
+| Language | [fill in] |
+| ORM / Data layer | [fill in] |
+| Auth | [fill in] |
+| API Docs | [fill in] |
+| Testing | [fill in] |
+| Migrations | [fill in] |
+| Validation | [fill in — e.g. class-validator, Zod] |
+| Logging | [fill in — e.g. pino, Winston] |
+
+### Frontend
+| Concern | Choice |
+|---|---|
+| Framework | [fill in] |
+| Language | [fill in] |
+| Styling | [fill in] |
+| State | [fill in] |
+| Testing | [fill in] |
+| HTTP | [fill in] |
+| Data fetching | [fill in — e.g. Server Components, React Query] |
+
+### Infrastructure
+| Concern | Choice |
+|---|---|
+| Cloud provider(s) | [fill in] |
+| IaC tool | [fill in — e.g. Terraform, OpenTofu, Pulumi, AWS CDK] |
+| IaC state backend | [fill in — e.g. S3 + DynamoDB lock, Terraform Cloud, GCS] |
+| Secrets manager | [fill in — e.g. AWS Secrets Manager, GCP Secret Manager, Vault] |
+| CI/CD | [fill in — e.g. GitHub Actions, GitLab CI] |
+| Database | [fill in] |
+| Task Automation | [fill in] |
+| Config | [fill in] |
+| Observability | [fill in — logs, metrics, traces backend] |
+
+### Security & Compliance
+| Concern | Choice |
+|---|---|
+| Compliance frameworks | [fill in — e.g. ISO27001, SOC2, none] |
+| Encryption at rest | [fill in — provider-managed / customer-managed / client-side] |
+| Encryption in transit | [fill in — TLS version minimum] |
+| Data classification scheme | [fill in — e.g. public / internal / confidential / PII] |
+| Vulnerability scanning | [fill in — e.g. Dependabot, Snyk, Trivy] |
+
+---
+
+## Repository Structure
+
+> Fill in your actual directory and file structure.
+
+```
+/
+├── [backend app directory]/
+│   └── src/
+│       └── [describe your module structure here]
+├── [frontend app directory]/
+│   └── [describe your component/page structure here]
+├── infra/
+│   ├── modules/         # Reusable IaC modules
+│   ├── envs/            # Per-environment root configs (dev, staging, prod)
+│   └── README.md        # Runbook: how to plan/apply, where state lives
+├── docs/
+│   ├── proposals/
+│   └── decisions/
+└── .env.example
+```
+
+---
+
+## Architecture Rules
+
+### Backend
+- One module per feature domain — no cross-domain imports except through explicit interfaces
+- Controllers are thin — all business logic lives in services
+- All calls to external APIs go through a single typed client — never call external APIs directly from domain services
+- Environment config via `ConfigService` only — never `process.env` directly
+- No hardcoded external URLs, IDs, or credentials — always from config
+- No N+1 queries — related data fetched in bulk
+- All unbounded queries require a `where` clause or explicit pagination
+- Every external HTTP call has an explicit timeout (default 5s)
+- All inbound DTOs are validated at the controller boundary — never trust raw request bodies
+- Mutating endpoints that may be retried support an idempotency key
+
+### Frontend
+- All API calls through a single typed wrapper in `lib/api.ts`
+- State stores in `store/` — one file per concern; mutations only via defined actions
+- No logic in page components — delegate to services or custom hooks
+- Components with large data tables must use `useMemo` for derived calculations
+- Server Components by default in Next.js App Router; Client Components only when interactivity requires
+- No `useEffect` for data fetching — use Server Components or a query library
+- Every async UI has explicit loading and error states
+
+### Infrastructure (IaC)
+- All infrastructure is declarative and committed to version control — no imperative scripts mutating shared environments
+- Remote state with locking is mandatory for any shared environment — no `backend "local"` outside throwaway sandboxes
+- Environments differ only by variables, not by resource definitions
+- Every cloud resource carries the standard tags: `owner`, `env`, `service`, `cost-center`, `managed-by`
+- Provider and module versions are pinned (`~>` for minor on providers, exact for registry modules)
+- Secrets never appear in `.tf`, `.tfvars`, plan output, or state outputs — always referenced from the secrets manager by ID/ARN
+- Apply is performed only by CI against shared environments — no developer laptops applying to staging/prod
+- IAM policies start from deny; resource-level scoping required; no `*` action on `*` resource
+
+### TypeScript
+- Strict mode throughout — no `any`, no implicit returns
+- `readonly` by default on class fields and array/tuple types where mutation isn't required
+- Discriminated unions over optional flags for state representation
+- `as const` object literals + derived union type instead of `enum`
+- Explicit return types on all exported functions and class methods
+
+### Observability
+- Structured logging only — no `console.log` in production paths
+- Every request gets a correlation/request ID propagated to downstream calls
+- Log at boundaries: request in, request out, external call in, external call out
+- Log levels: `error` (actionable), `warn` (degraded), `info` (state change), `debug` (diagnostic)
+- Never log secrets, tokens, full Authorization headers, or PII
+
+---
+
+## Security Rules (hard blocks)
+
+- No credentials, tokens, or secrets committed in any file (including test fixtures and `.tfvars`)
+- `process.env` must not be accessed outside the config service
+- All controller endpoints require an auth guard, except explicitly public routes (e.g. health check, API docs)
+- No SQL built via string interpolation — use parameterised queries or ORM query builders
+- No hardcoded external service URLs or resource IDs in source code
+- No IAM policy with `*` action and `*` resource
+- No public network exposure (`0.0.0.0/0` ingress, public bucket, public DB) without a documented justification in a proposal
+- No `dangerouslySetInnerHTML` or equivalent for user-supplied content
+- Lockfile changes must correspond to an intentional dependency change
+
+---
+
+## Testing Requirements
+
+### Backend
+- Unit tests for all service methods — mock external clients and ORM repositories
+- Do not test controllers directly — test services
+- Integration tests for critical API endpoints using a mock or test database
+- Tests describe behaviour, not implementation, in their names
+- No shared mutable state between tests
+
+### Frontend
+- Unit tests for all significant components
+- Unit tests for state stores in isolation
+- No logic under test should hit a real network
+
+### Infrastructure
+- Non-trivial IaC modules have tests (Terratest / `terraform test` / Pulumi unit tests)
+- Every PR touching infra includes the `terraform plan` (or equivalent) summary in the PR description
+
+---
+
+## Design & Proposal Workflow
+
+Write a proposal in `docs/proposals/NNNN-short-kebab-case-title.md` before implementing any:
+- New module, service, or significant component
+- Module boundary or data flow change
+- New external API integration point
+- Schema change affecting more than one entity
+- Cross-cutting concern (caching, error handling strategy, etc.)
+- New cloud resource type, network topology change, or new IAM role/policy with write/admin scope
+- New secret, change to backup/retention, or change to the deployment pipeline
+
+When a proposal is accepted, create the corresponding ADR in `docs/decisions/NNNN-title.md`
+and update the proposal status to `Accepted`.
+
+See the `architect` and `decision-log` skills for the exact proposal and ADR formats.
+
+---
+
+## Settled Decisions (do not revisit without a superseding ADR)
+
+| # | Decision |
+|---|---|
+| — | *(add ADR entries here as decisions are made)* |
